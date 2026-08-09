@@ -18,7 +18,7 @@ from typing import Any
 from PIL import Image, UnidentifiedImageError
 
 from lib.atomic_write import atomic_write_bytes
-from lib.artifact_identity import is_sha256
+from lib.artifact_identity import is_sha256, snapshot_file
 from lib.hashing import canonical_json_sha256, file_sha256
 from lib.background_contracts import (
     resolved_element_mode_map,
@@ -114,8 +114,8 @@ def fixed_font_issues(
 ) -> list[dict[str, str]]:
     """Return inconsistent preferred-font declarations.
 
-    A runtime report is optional. When present, keep the stricter reviewed-mode
-    checks against its resolved family and real Bold face. Otherwise derive the
+    A runtime report is optional. When present on the compatibility prebuild
+    path, check its resolved family and real Bold face. Otherwise derive the
     preferred family from the first typography item and only enforce consistent
     declarations inside the build specification.
     """
@@ -603,7 +603,7 @@ def _validate_gate_artifact(
     value: Any,
     path: str,
     errors: list[dict[str, str]],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, bytes] | None:
     if not isinstance(value, dict):
         _error(errors, "SPEC_GATE_ARTIFACT_MISSING", path, "artifact identity is required")
         return None
@@ -619,15 +619,20 @@ def _validate_gate_artifact(
     if not resolved.is_file():
         _error(errors, "SPEC_GATE_ARTIFACT_NOT_FOUND", f"{path}.path", "artifact file does not exist")
         return None
-    actual = _file_sha256(resolved)
+    try:
+        raw, snapshot = snapshot_file(resolved, path)
+    except ToolError:
+        _error(errors, "SPEC_GATE_ARTIFACT_NOT_FOUND", f"{path}.path", "artifact file is missing or unstable")
+        return None
+    actual = snapshot.sha256
     if actual.lower() != digest.lower():
         _error(errors, "SPEC_GATE_ARTIFACT_HASH_MISMATCH", path, "artifact sha256 does not match current file")
         return None
-    return str(resolved), actual.lower()
+    return str(snapshot.original_path), actual.lower(), raw
 
 
 def _load_json_artifact(
-    artifact: tuple[str, str] | None,
+    artifact: tuple[str, str, bytes] | None,
     *,
     code: str,
     path: str,
@@ -636,8 +641,8 @@ def _load_json_artifact(
     if artifact is None:
         return None
     try:
-        payload = json.loads(Path(artifact[0]).read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = json.loads(artifact[2].decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
         _error(errors, code, path, "artifact must contain valid JSON")
         return None
     if not isinstance(payload, dict):
@@ -1394,17 +1399,19 @@ def _identity_only_final(
             _error(errors, "SPEC_GATE_EVIDENCE_INVALID", f"{gate_name}.evidence", "non-empty evidence paths are required")
 
     tripwire = visual_gate.get("tripwire")
-    tripwire_valid = isinstance(tripwire, dict) and (
-        (
-            tripwire.get("available") is False
-            and tripwire.get("triggered") is None
-            and tripwire.get("reason") == "no_approved_baseline"
+    tripwire_valid = tripwire is None and verification_profile == "reviewed"
+    if not tripwire_valid:
+        tripwire_valid = isinstance(tripwire, dict) and (
+            (
+                tripwire.get("available") is False
+                and tripwire.get("triggered") is None
+                and tripwire.get("reason") == "no_approved_baseline"
+            )
+            or (
+                tripwire.get("available") is True
+                and tripwire.get("triggered") is False
+            )
         )
-        or (
-            tripwire.get("available") is True
-            and tripwire.get("triggered") is False
-        )
-    )
     if not tripwire_valid:
         _error(errors, "SPEC_VISUAL_TRIPWIRE_INVALID", "visual_gate.tripwire", "tripwire must be explicitly safe")
 
@@ -1429,18 +1436,6 @@ def _identity_only_final(
     if artifacts is None:
         return summary
     summary["current_pptx"] = artifacts.identities["current_pptx"]
-    summary["runtime_preflight"] = artifacts.identities["runtime_preflight"]
-    try:
-        build_payload = json.loads(
-            Path(artifacts.identities["build_report"]["path"]).read_text(
-                encoding="utf-8"
-            )
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-        build_payload = {}
-    summary["capability_manifest_sha256"] = build_payload.get(
-        "capability_manifest_sha256"
-    )
 
     review_round = visual_gate.get("review_round")
     reviewer = visual_gate.get("reviewer")
@@ -1454,6 +1449,7 @@ def _identity_only_final(
             if value is not None:
                 _error(errors, "SPEC_RAPID_REVIEWER_FORBIDDEN", f"visual_gate.{field}", "rapid must not carry reviewer state")
     else:
+        summary["current_artifacts"] = artifacts.identities
         if type(review_round) is not int or review_round not in {1, 2}:
             _error(errors, "SPEC_VISUAL_REVIEW_ROUND_INVALID", "visual_gate.review_round", "review round must be 1 or 2")
         if not is_sha256(bound_context_hash):
@@ -1472,7 +1468,6 @@ def _identity_only_final(
                     verification_profile=verification_profile,
                     content_spec_sha256=content_spec_sha256(spec),
                     artifacts=artifacts.identities,
-                    region_evidence=list(artifacts.region_evidence),
                 )
                 current_context_hash = review_context_sha256(context)
             except (KeyError, TypeError, ValueError) as exc:
@@ -1505,15 +1500,19 @@ def _identity_only_final(
                 errors.extend(response_errors)
                 if response.get("decision") != "passed":
                     _error(errors, "SPEC_OPEN_BLOCKING_DIFFERENCE", "visual_gate.reviewer.response", "non-passing reviewer decision blocks delivery")
+                elif not response_errors and response_artifact is not None:
+                    summary["review_outcome"] = {
+                        "review_round": review_round,
+                        "review_context_sha256": current_context_hash,
+                        "reviewer_response": {
+                            "path": response_artifact[0],
+                            "sha256": response_artifact[1],
+                        },
+                        "decision": "passed",
+                    }
 
     high_risk = spec.get("modules", {}).get("high_risk") if isinstance(spec.get("modules"), dict) else None
     items = high_risk.get("items", []) if isinstance(high_risk, dict) else []
-    if review_round == 2 and (
-        not isinstance(items, list)
-        or not items
-        or any(not isinstance(item, dict) or item.get("result") != "passed" for item in items)
-    ):
-        _error(errors, "SPEC_HIGH_RISK_ITEMS_INVALID", "modules.high_risk.items", "round 2 requires passed high-risk closure")
     for index, item in enumerate(items if isinstance(items, list) else []):
         if isinstance(item, dict) and item.get("severity") in {"P0", "P1"} and item.get("result") != "passed":
             _error(errors, "SPEC_OPEN_BLOCKING_DIFFERENCE", f"modules.high_risk.items[{index}]", "open P0/P1 blocks final delivery")
@@ -1953,7 +1952,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--runtime",
         type=Path,
-        help="optional passing batch/runtime-preflight.json for the strict reviewed path",
+        help="optional passing batch/runtime-preflight.json for compatibility prebuild validation",
     )
     args = parser.parse_args(argv)
     if args.snapshot is not None and args.stage != "prebuild":

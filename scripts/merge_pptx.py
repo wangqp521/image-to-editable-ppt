@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -17,6 +18,13 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from lib.font_runtime import font_runtime_identity, validate_font_runtime
+from lib.artifact_identity import snapshot_file
+from lib.final_identity import collect_current_artifacts
+from lib.reviewer_contracts import (
+    build_review_context,
+    review_context_sha256,
+    reviewer_response_issues,
+)
 from lib.spec_identity import content_spec_sha256
 
 
@@ -111,7 +119,7 @@ def _load_final_report(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _artifact_identity(value: Any, code: str) -> tuple[Path, str]:
+def _artifact_identity(value: Any, code: str) -> tuple[Path, str, bytes]:
     if not isinstance(value, dict):
         raise MergeError(code, "Required artifact identity is missing")
     raw_path = value.get("path")
@@ -121,14 +129,18 @@ def _artifact_identity(value: Any, code: str) -> tuple[Path, str]:
     path = Path(raw_path).expanduser()
     if path.is_symlink() or not path.is_file():
         raise MergeError(code, f"Artifact does not exist: {path}")
-    actual = _file_sha256(path.resolve())
+    try:
+        raw, snapshot = snapshot_file(path.resolve(), code)
+    except Exception as exc:
+        raise MergeError(code, f"Artifact is missing or unstable: {path}") from exc
+    actual = snapshot.sha256
     if not isinstance(digest, str) or actual.lower() != digest.lower():
         raise MergeError(code, f"Artifact hash mismatch: {path}")
-    return path.resolve(), actual.lower()
+    return snapshot.original_path, actual.lower(), raw
 
 
 def render_runtime_identity(report: Any) -> tuple[Any, ...]:
-    """Return one merge-comparable renderer and fixed-font identity."""
+    """Return a legacy-compatible renderer identity; not an active merge gate."""
     if not isinstance(report, dict):
         raise ValueError("render report must be an object")
     renderer = report.get("renderer")
@@ -167,30 +179,7 @@ def render_runtime_identity(report: Any) -> tuple[Any, ...]:
     return identity
 
 
-def _render_identity(spec: dict[str, Any]) -> tuple[Any, ...]:
-    visual_gate = spec.get("visual_gate")
-    artifact = (
-        visual_gate.get("render_report") if isinstance(visual_gate, dict) else None
-    )
-    report_path, _ = _artifact_identity(artifact, "RENDER_REPORT_INVALID")
-    try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise MergeError(
-            "RENDER_REPORT_INVALID",
-            f"Render report is not valid JSON: {report_path}",
-        ) from exc
-    try:
-        identity = render_runtime_identity(report)
-    except ValueError as exc:
-        raise MergeError(
-            "RENDER_REPORT_INVALID",
-            f"Render report identity is incomplete: {report_path}",
-        ) from exc
-    return identity
-
-
-def _validate_page_binding(
+def _validate_reviewed_page_binding(
     input_path: Path,
     spec: dict[str, Any],
     final_report: dict[str, Any],
@@ -205,6 +194,11 @@ def _validate_page_binding(
             "VERIFICATION_PROFILE_INVALID",
             f"Every page spec requires rapid or reviewed verification: {page_id}",
         )
+    if verification_profile != "reviewed":
+        raise MergeError(
+            "DRAFT_MERGE_REQUIRED",
+            f"Successful merge accepts reviewed pages only; use --draft for {verification_profile}: {page_id}",
+        )
     delivery_status = spec.get("delivery_status")
     if delivery_status not in PROFILE_DELIVERY_STATUSES[verification_profile]:
         raise MergeError(
@@ -214,15 +208,23 @@ def _validate_page_binding(
     if delivery_status != PROFILE_SUCCESS_STATUSES[verification_profile]:
         raise MergeError(
             "FINAL_REPORT_INVALID",
-            f"Only a successfully finalized page can be merged: {page_id}",
+            f"Only reviewed_passed pages can use successful merge: {page_id}",
         )
-    gate_hashes: list[str] = []
-    for gate_name in ("visual_gate", "editability_gate"):
-        gate = spec.get(gate_name)
-        identity = gate.get("pptx") if isinstance(gate, dict) else None
-        if isinstance(identity, dict) and isinstance(identity.get("sha256"), str):
-            gate_hashes.append(identity["sha256"].lower())
-    if not gate_hashes or any(value != input_hash for value in gate_hashes):
+    visual_gate = spec.get("visual_gate")
+    editability_gate = spec.get("editability_gate")
+    gate_hashes = [
+        gate.get("pptx", {}).get("sha256")
+        for gate in (visual_gate, editability_gate)
+        if isinstance(gate, dict) and isinstance(gate.get("pptx"), dict)
+    ]
+    if (
+        len(gate_hashes) != 2
+        or any(not isinstance(value, str) or value.lower() != input_hash for value in gate_hashes)
+        or not isinstance(visual_gate, dict)
+        or visual_gate.get("status") != "passed"
+        or not isinstance(editability_gate, dict)
+        or editability_gate.get("status") != "passed"
+    ):
         raise MergeError(
             "INPUT_SPEC_HASH_MISMATCH",
             f"Input PPTX is not the page currently bound by the spec: {input_path}",
@@ -230,16 +232,13 @@ def _validate_page_binding(
             actual=input_hash,
             declared=gate_hashes,
         )
-    editability_gate = spec.get("editability_gate")
-    validator_identity = (
-        editability_gate.get("validator") if isinstance(editability_gate, dict) else None
-    )
-    validator_path, _ = _artifact_identity(
+    validator_identity = editability_gate.get("validator")
+    validator_path, _, validator_raw = _artifact_identity(
         validator_identity, "VALIDATOR_ARTIFACT_INVALID"
     )
     try:
-        validator_report = json.loads(validator_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        validator_report = json.loads(validator_raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
         raise MergeError("VALIDATOR_ARTIFACT_INVALID", "Validator report is not valid JSON") from exc
     if (
         not isinstance(validator_report, dict)
@@ -251,44 +250,17 @@ def _validate_page_binding(
             "VALIDATOR_ARTIFACT_INVALID",
             f"Validator report does not bind a valid current PPTX: {input_path}",
         )
-    final_pptx = final_report.get("current_pptx")
     if (
         final_report.get("valid") is not True
         or final_report.get("errors") != []
         or final_report.get("stage") != "final"
-        or final_report.get("verification_profile") != verification_profile
+        or final_report.get("verification_profile") != "reviewed"
         or final_report.get("delivery_status") != delivery_status
         or final_report.get("content_spec_sha256") != content_spec_sha256(spec)
-        or not isinstance(final_pptx, dict)
-        or final_pptx.get("sha256") != input_hash
-        or final_pptx.get("path") != str(input_path.resolve())
     ):
         raise MergeError(
             "FINAL_REPORT_INVALID",
             f"Final report does not bind the current page, spec, profile, and PPTX: {page_id}",
-        )
-    spec_runtime_path, spec_runtime_hash = _artifact_identity(
-        spec.get("runtime_preflight"), "RUNTIME_PREFLIGHT_INVALID"
-    )
-    final_runtime = final_report.get("runtime_preflight")
-    if (
-        not isinstance(final_runtime, dict)
-        or final_runtime.get("path") != str(spec_runtime_path)
-        or final_runtime.get("sha256") != spec_runtime_hash
-    ):
-        raise MergeError(
-            "FINAL_REPORT_INVALID",
-            f"Final report runtime identity does not match the current spec: {page_id}",
-        )
-    capability_hash = final_report.get("capability_manifest_sha256")
-    if (
-        not isinstance(capability_hash, str)
-        or len(capability_hash) != 64
-        or any(character not in "0123456789abcdef" for character in capability_hash)
-    ):
-        raise MergeError(
-            "FINAL_REPORT_INVALID",
-            f"Final report capability identity is invalid: {page_id}",
         )
     if (
         not isinstance(validator_report, dict)
@@ -305,20 +277,119 @@ def _validate_page_binding(
             "VALIDATOR_ARTIFACT_INVALID",
             f"Structure report does not bind one valid current slide: {input_path}",
         )
+    artifacts, artifact_errors = collect_current_artifacts(spec)
+    if artifacts is None:
+        raise MergeError(
+            "ARTIFACT_IDENTITY_INVALID",
+            f"Current reviewed artifacts are invalid: {page_id}",
+            errors=artifact_errors,
+        )
+    if final_report.get("current_artifacts") != artifacts.identities:
+        raise MergeError(
+            "FINAL_REPORT_INVALID",
+            f"Final report artifacts are stale: {page_id}",
+        )
+    final_pptx = artifacts.identities["current_pptx"]
+    if final_pptx["sha256"] != input_hash or final_pptx["path"] != str(input_path.resolve()):
+        raise MergeError(
+            "FINAL_REPORT_INVALID",
+            f"Final report does not bind the current input PPTX: {page_id}",
+        )
+    declared_final_pptx = final_report.get("current_pptx")
+    if declared_final_pptx != final_pptx:
+        raise MergeError(
+            "FINAL_REPORT_INVALID",
+            f"Final report current PPTX is stale: {page_id}",
+        )
+
+    review_round = visual_gate.get("review_round")
+    bound_context_hash = visual_gate.get("review_context_sha256")
+    reviewer = visual_gate.get("reviewer")
+    response_identity = reviewer.get("response") if isinstance(reviewer, dict) else None
+    outcome = final_report.get("review_outcome")
+    if (
+        type(review_round) is not int
+        or review_round not in {1, 2}
+        or not isinstance(bound_context_hash, str)
+        or not isinstance(reviewer, dict)
+        or set(reviewer) != {"mode", "response"}
+        or reviewer.get("mode") != "independent_read_only_subagent"
+        or not isinstance(response_identity, dict)
+        or not isinstance(outcome, dict)
+        or outcome.get("review_round") != review_round
+        or outcome.get("review_context_sha256") != bound_context_hash
+        or outcome.get("reviewer_response") != response_identity
+        or outcome.get("decision") != "passed"
+    ):
+        raise MergeError(
+            "REVIEW_OUTCOME_INVALID",
+            f"Final review outcome is incomplete or stale: {page_id}",
+        )
+    try:
+        context = build_review_context(
+            page_id=page_id,
+            review_round=review_round,
+            verification_profile="reviewed",
+            content_spec_sha256=content_spec_sha256(spec),
+            artifacts=artifacts.identities,
+        )
+        current_context_hash = review_context_sha256(context)
+        response_path, response_hash, response_raw = _artifact_identity(
+            response_identity, "REVIEW_OUTCOME_INVALID"
+        )
+        response = json.loads(response_raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise MergeError(
+            "REVIEW_OUTCOME_INVALID",
+            f"Reviewer outcome cannot be read: {page_id}",
+        ) from exc
+    if (
+        current_context_hash != bound_context_hash
+        or outcome["reviewer_response"] != {"path": str(response_path), "sha256": response_hash}
+        or reviewer_response_issues(
+            response,
+            expected_context_sha256=current_context_hash,
+            page_id=page_id,
+            review_round=review_round,
+            verification_profile="reviewed",
+            required_coverage=artifacts.required_coverage,
+            allowed_evidence=artifacts.allowed_evidence,
+        )
+        or response.get("decision") != "passed"
+    ):
+        raise MergeError(
+            "REVIEW_OUTCOME_INVALID",
+            f"Reviewer response does not bind the current reviewed page: {page_id}",
+        )
+    pptx_path, pptx_hash, pptx_raw = _artifact_identity(
+        final_pptx,
+        "INPUT_SPEC_HASH_MISMATCH",
+    )
+    if pptx_path != input_path.resolve() or pptx_hash != input_hash:
+        raise MergeError(
+            "INPUT_SPEC_HASH_MISMATCH",
+            f"Validated PPTX snapshot is stale: {page_id}",
+        )
     return {
         "page_id": page_id,
-        "verification_profile": verification_profile,
+        "verification_profile": "reviewed",
         "delivery_status": delivery_status,
         "profile_passed": True,
-        "runtime_sha256": spec_runtime_hash,
-        "capability_manifest_sha256": capability_hash,
         "validation": validator_report,
+        "pptx_raw": pptx_raw,
+        "review_identity": {
+            "page_id": page_id,
+            "review_round": review_round,
+            "review_context_sha256": current_context_hash,
+            "reviewer_response_sha256": response_hash,
+        },
     }
 
 
-def _read_package(path: Path) -> dict[str, bytes]:
+def _read_package(path: Path, raw: bytes | None = None) -> dict[str, bytes]:
     try:
-        with zipfile.ZipFile(path) as archive:
+        source = io.BytesIO(raw) if raw is not None else path
+        with zipfile.ZipFile(source) as archive:
             bad = archive.testzip()
             if bad:
                 raise MergeError("INPUT_ZIP_CORRUPT", f"Corrupt PPTX member: {bad}")
@@ -618,7 +689,6 @@ def merge_presentations(
     paths = [Path(item).expanduser().resolve() for item in inputs]
     spec_paths: list[Path] = []
     final_report_paths: list[Path] = []
-    render_identities: list[tuple[Any, ...]] = []
     page_bindings: list[dict[str, Any]] = []
     validations: list[dict[str, Any]] = []
 
@@ -684,12 +754,10 @@ def merge_presentations(
                 profiles=verification_profiles,
             )
         verification_profile = verification_profiles[0]
-        render_identities = [_render_identity(spec) for spec in page_specs]
-        if len(set(render_identities)) != 1:
+        if verification_profile != "reviewed":
             raise MergeError(
-                "RENDER_RUNTIME_MIXED",
-                "All merge inputs must use the same LibreOffice, fixed font runtime, and preview size",
-                identities=render_identities,
+                "DRAFT_MERGE_REQUIRED",
+                "Successful merge accepts reviewed_passed pages only; use --draft for rapid pages",
             )
         page_ids = [spec.get("page_id") for spec in page_specs]
         if any(
@@ -706,25 +774,9 @@ def merge_presentations(
         ):
             if not path.is_file():
                 raise MergeError("INPUT_NOT_FOUND", f"Merge input does not exist: {path}")
-            binding = _validate_page_binding(path, page_spec, final_report)
+            binding = _validate_reviewed_page_binding(path, page_spec, final_report)
             page_bindings.append(binding)
             validations.append(binding["validation"])
-        runtime_hashes = {
-            binding["runtime_sha256"] for binding in page_bindings
-        }
-        if len(runtime_hashes) != 1:
-            raise MergeError(
-                "RUNTIME_PREFLIGHT_MIXED",
-                "All merge inputs must use the same runtime preflight identity",
-            )
-        capability_hashes = {
-            binding["capability_manifest_sha256"] for binding in page_bindings
-        }
-        if len(capability_hashes) != 1:
-            raise MergeError(
-                "CAPABILITY_MANIFEST_MIXED",
-                "All merge inputs must use the same capability manifest identity",
-            )
     expected_size = (
         validations[0].get("width_emu"),
         validations[0].get("height_emu"),
@@ -739,15 +791,21 @@ def merge_presentations(
                 actual=actual_size,
             )
 
-    destination_entries = _read_package(paths[0])
+    destination_entries = _read_package(
+        paths[0],
+        None if draft else page_bindings[0]["pptx_raw"],
+    )
     try:
         destination_content_types = ET.fromstring(destination_entries["[Content_Types].xml"])
     except (KeyError, ET.ParseError) as exc:
         raise MergeError("CONTENT_TYPES_INVALID", "Cannot parse destination content types") from exc
 
     imported_parts = []
-    for path in paths[1:]:
-        source_entries = _read_package(path)
+    for index, path in enumerate(paths[1:], start=1):
+        source_entries = _read_package(
+            path,
+            None if draft else page_bindings[index]["pptx_raw"],
+        )
         imported_parts.append(
             _append_slide(destination_entries, source_entries, destination_content_types)
         )
@@ -773,13 +831,6 @@ def merge_presentations(
     finally:
         temporary.unlink(missing_ok=True)
 
-    all_passed = (not draft) and all(
-        binding["profile_passed"] for binding in page_bindings
-    )
-    delivery_labels = {
-        "rapid": ("快速校验版", "快速校验未通过版"),
-        "reviewed": ("独立复核通过版", "独立复核未通过版"),
-    }
     result = {
         "output": str(output),
         "slide_count": len(paths),
@@ -792,27 +843,15 @@ def merge_presentations(
         "delivery_label": (
             "可编辑草稿"
             if draft
-            else delivery_labels[verification_profile][0 if all_passed else 1]
+            else "独立复核通过版"
         ),
         "imported_slide_parts": imported_parts,
         "validation": validation,
     }
     if not draft:
-        result["render_identity"] = {
-            "backend": render_identities[0][0],
-            "version": render_identities[0][1],
-            "executable_sha256": render_identities[0][2],
-            "font_runtime": {
-                "family": render_identities[0][3],
-                "provider": render_identities[0][4],
-                "regular_sha256": render_identities[0][5],
-                "regular_face_index": render_identities[0][6],
-                "bold_sha256": render_identities[0][7],
-                "bold_face_index": render_identities[0][8],
-            },
-            "fontconfig_sha256": render_identities[0][9],
-            "preview_size": list(render_identities[0][10]),
-        }
+        result["review_identity"] = [
+            binding["review_identity"] for binding in page_bindings
+        ]
     return result
 
 

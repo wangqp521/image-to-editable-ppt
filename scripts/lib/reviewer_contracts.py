@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 from typing import Any
@@ -17,11 +16,8 @@ REVIEW_CONTEXT_ARTIFACT_FIELDS = (
     "current_pptx",
     "source",
     "preview",
-    "render_report",
-    "runtime_preflight",
     "structure_validation",
     "background_contract",
-    "visual_diff",
 )
 RAW_REVIEWER_RESPONSE_FIELDS = (
     "response_schema_version",
@@ -36,9 +32,6 @@ RAW_REVIEWER_RESPONSE_FIELDS = (
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REVIEW_PROFILES = frozenset({"reviewed"})
-_REGION_FIELDS = frozenset({"region_id", "path", "sha256", "bbox", "scale"})
-
-
 VISUAL_REVIEW_COVERAGE_FIELDS = {
     "canvas_and_regions",
     "objects_and_geometry",
@@ -130,45 +123,6 @@ def _identity(value: Any, *, field: str) -> dict[str, str]:
     return {"path": path, "sha256": sha256}
 
 
-def _region(value: Any, *, index: int) -> dict[str, Any]:
-    field = f"region_evidence[{index}]"
-    if not isinstance(value, dict) or set(value) != _REGION_FIELDS:
-        raise ValueError(f"{field} must contain exactly the region evidence fields")
-    region_id = value.get("region_id")
-    if not _nonempty_string(region_id):
-        raise ValueError(f"{field}.region_id must be a non-empty string")
-    identity = _identity(
-        {"path": value.get("path"), "sha256": value.get("sha256")},
-        field=field,
-    )
-    bbox = value.get("bbox")
-    if (
-        not isinstance(bbox, list)
-        or len(bbox) != 4
-        or any(
-            isinstance(item, bool)
-            or not isinstance(item, (int, float))
-            or not math.isfinite(item)
-            for item in bbox
-        )
-    ):
-        raise ValueError(f"{field}.bbox must contain four finite JSON numbers")
-    scale = value.get("scale")
-    if (
-        isinstance(scale, bool)
-        or not isinstance(scale, (int, float))
-        or not math.isfinite(scale)
-        or scale <= 0
-    ):
-        raise ValueError(f"{field}.scale must be a positive finite JSON number")
-    return {
-        "region_id": region_id,
-        **identity,
-        "bbox": list(bbox),
-        "scale": scale,
-    }
-
-
 def build_review_context(
     *,
     page_id: str,
@@ -176,7 +130,6 @@ def build_review_context(
     verification_profile: str,
     content_spec_sha256: str,
     artifacts: dict[str, Any],
-    region_evidence: list[Any],
 ) -> dict[str, Any]:
     """Build canonical reviewer inputs from already-validated JSON identities."""
     if not _nonempty_string(page_id):
@@ -191,19 +144,8 @@ def build_review_context(
         REVIEW_CONTEXT_ARTIFACT_FIELDS
     ):
         raise ValueError("artifacts must contain exactly the review artifact fields")
-    if not isinstance(region_evidence, list):
-        raise ValueError("region_evidence must be a JSON array")
-
-    normalized_regions = [
-        _region(value, index=index) for index, value in enumerate(region_evidence)
-    ]
-    region_ids = [value["region_id"] for value in normalized_regions]
-    if len(region_ids) != len(set(region_ids)):
-        raise ValueError("region_evidence must not contain duplicate region_id values")
-    normalized_regions.sort(key=lambda value: (value["region_id"], value["path"]))
-
     context: dict[str, Any] = {
-        "context_schema_version": "1",
+        "context_schema_version": "2",
         "page_id": page_id,
         "review_round": review_round,
         "verification_profile": verification_profile,
@@ -211,7 +153,6 @@ def build_review_context(
     }
     for name in REVIEW_CONTEXT_ARTIFACT_FIELDS:
         context[name] = _identity(artifacts[name], field=name)
-    context["region_evidence"] = normalized_regions
     return context
 
 
@@ -231,18 +172,48 @@ def render_reviewer_prompt(context: dict[str, Any]) -> str:
     )
     context_sha256 = review_context_sha256(context)
     coverage_fields = ", ".join(sorted(VISUAL_REVIEW_COVERAGE_FIELDS))
+    coverage_results = ", ".join(sorted(VISUAL_REVIEW_COVERAGE_RESULTS))
+    finding_fields = ", ".join(sorted(VISUAL_REVIEW_FINDING_FIELDS))
     response_fields = ", ".join(RAW_REVIEWER_RESPONSE_FIELDS)
+    response_skeleton = json.dumps(
+        {
+            "response_schema_version": "1",
+            "review_context_sha256": context_sha256,
+            "page_id": context["page_id"],
+            "review_round": context["review_round"],
+            "verification_profile": context["verification_profile"],
+            "decision": "passed",
+            "coverage": {
+                field: "checked" for field in sorted(VISUAL_REVIEW_COVERAGE_FIELDS)
+            },
+            "findings": [],
+            "p2_disclosures": [],
+        },
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     return "\n".join(
         (
             "你是独立视觉审核者。执行 read-only 审核，不得修改任何文件，也不得运行 producer。",
             f"review_context_sha256: {context_sha256}",
             f"canonical review context: {canonical_context}",
             "只使用 context 中列出的当前证据绝对路径，并核对 source 与 preview。",
+            '协议版本不得混用：context_schema_version 固定为字符串 "2"；'
+            'response_schema_version 必须固定为字符串 "1"，不得复制前者。',
             f"coverage 必须精确包含七类：{coverage_fields}。",
+            f"coverage 值只允许：{coverage_results}。",
             f"只返回一个 JSON object，精确包含九个字段：{response_fields}。",
+            f"finding 必须包含以下六个必需字段：{finding_fields}。",
+            "finding.severity 只允许 P0、P1、P2；finding.category 必须是上述七类之一。",
             "decision 只允许 passed、changes_required、not_reviewable。",
             "findings 与 p2_disclosures 的 evidence 必须是 context 中证据绝对路径组成的非空数组。",
+            "p2_disclosures 中的每一项都必须是 severity=P2 的完整 finding。",
             "P0/P1 必须对应 changes_required；passed 不得包含 P0/P1 或 not_reviewable coverage。",
+            f"response JSON skeleton: {response_skeleton}",
+            "skeleton 仅示范字段、类型和当前 context 绑定；如发现问题，必须改写 decision 并填写完整 finding，不得盲目复制 passed。",
+            "输出前自检：仅输出 JSON，顶层恰好九个字段，版本、context identity、coverage 和 finding 均符合上述契约。",
         )
     )
 

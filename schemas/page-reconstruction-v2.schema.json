@@ -2643,7 +2643,8 @@
             "ellipse",
             "rectangle",
             "rightArrow",
-            "roundRect"
+            "roundRect",
+            "triangle"
           ]
         }
       },
@@ -3171,9 +3172,10 @@
           ]
         },
         "review_round": {
-          "type": [
-            "integer",
-            "null"
+          "enum": [
+            null,
+            1,
+            2
           ]
         },
         "reviewer": {
@@ -3211,5 +3213,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "8af59514945fc230c3c2819d6f3273501666d4a76125066d4db16495d278c904"
+  "x-schema-contract-sha256": "6b5d9c3f49cf0a266a77d1a1abc165026e2382f308221920d0e97c43c98bfc7f"
 }

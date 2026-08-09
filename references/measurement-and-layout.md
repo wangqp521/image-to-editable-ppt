@@ -6,7 +6,7 @@
 
 `content_reference` 唯一裁决文字/数字/单位/数量/分组/语义；`clean_visual_reference` 唯一裁决坐标/比例/颜色/字体观感/图标/纹理/层级。直通页均指原图；清洗页内容仍服从原图，清洗改动禁入 PPTX；页间不借事实。
 
-`rapid` 不运行 runtime/font preflight。每页并行启动 coordinate overlay 和 source hash/尺寸；输出隔离，任一失败不得消费部分结果。写规格前以 `[第 N/总页数] 坐标定位图` 展示 PNG；同源每页一次。将 overlay path/hash、source hash、grid、manifest、`inspection=passed` 写入 `coordinate_overlay_evidence`。来源/grid 改变即重建。只有用户明确选择 `reviewed` 时，才按严格链生成并锁定 runtime report。
+`rapid` 与独立复核流程都不运行 runtime/font preflight。每页并行启动 coordinate overlay 和 source hash/尺寸；输出隔离，任一失败不得消费部分结果。写规格前以 `[第 N/总页数] 坐标定位图` 展示 PNG；同源每页一次。将 overlay path/hash、source hash、grid、manifest、`inspection=passed` 写入 `coordinate_overlay_evidence`。来源/grid 改变即重建。
 
 展示后按 frame/mapping → regions → 锚点/层级 → 高风险文字/数据 → 图片/图标 → 颜色完成一次盘点。把明确点位合为一次重复 `--point/--bbox` 调用；仅触边、邻近污染、遮挡/低清或报告无效时二测对应局部，禁多轮小测量。
 

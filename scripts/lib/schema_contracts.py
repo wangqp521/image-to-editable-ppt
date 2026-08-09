@@ -21,7 +21,7 @@ SCHEMA_VERSION = 2
 
 CANONICAL_VALUES = {
     "shape_type": frozenset(
-        {"rectangle", "roundRect", "ellipse", "chevron", "rightArrow"}
+        {"rectangle", "roundRect", "ellipse", "triangle", "chevron", "rightArrow"}
     ),
     "line_dash": frozenset({"solid", "dash", "dot", "dashDot"}),
     "line_arrow": frozenset(
@@ -1140,7 +1140,7 @@ _RECORDS: dict[str, dict[str, Any]] = {
             "status": NON_EMPTY_STRING,
             "evidence": _array(NON_EMPTY_STRING),
             "tripwire": {"type": ["object", "null"]},
-            "review_round": {"type": ["integer", "null"]},
+            "review_round": {"enum": [None, 1, 2]},
             "review": {"type": ["object", "null"]},
             "reviewer": {"anyOf": [_ref("ReviewerBinding"), {"type": "null"}]},
             "review_context_sha256": {"anyOf": [SHA256, {"type": "null"}]},
