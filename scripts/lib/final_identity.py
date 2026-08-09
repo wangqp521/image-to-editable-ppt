@@ -9,19 +9,14 @@ from typing import Any
 
 from .artifact_identity import EvidenceSnapshot, ensure_unchanged, is_sha256, snapshot_file
 from .hashing import canonical_json_sha256
-from .reviewer_contracts import (
-    REVIEW_CONTEXT_ARTIFACT_FIELDS,
-    VISUAL_REVIEW_COVERAGE_FIELDS,
-    build_review_context,
-)
 from .spec_identity import content_spec_sha256, input_spec_sha256
+from .visual_review_contracts import CURRENT_VISUAL_ARTIFACT_FIELDS
 
 
 @dataclass(frozen=True)
 class CurrentArtifacts:
     identities: dict[str, dict[str, str]]
     required_coverage: frozenset[str]
-    allowed_evidence: frozenset[str]
 
 
 class _InvalidIdentity(Exception):
@@ -223,42 +218,12 @@ def collect_current_artifacts(
             "structure_validation": structure_identity,
             "background_contract": background_identity,
         }
-        _expect(tuple(identities) == REVIEW_CONTEXT_ARTIFACT_FIELDS, "artifacts", "artifact field order is invalid")
+        _expect(tuple(identities) == CURRENT_VISUAL_ARTIFACT_FIELDS, "artifacts", "artifact field order is invalid")
         return CurrentArtifacts(
             identities=identities,
             required_coverage=_required_coverage(spec, profile),
-            allowed_evidence=frozenset(
-                identity["path"] for identity in identities.values()
-            ),
         ), []
     except _InvalidIdentity as exc:
         return None, [exc.issue()]
     except Exception as exc:
         return None, [{"code": "FINAL_IDENTITY_INVALID", "path": "artifacts", "detail": f"cannot collect current artifact identities: {exc}"}]
-
-
-def prepare_review_context(
-    spec: Any, review_round: int
-) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
-    if isinstance(spec, dict) and spec.get("verification_profile") == "rapid":
-        return None, [
-            {
-                "code": "REVIEWER_NOT_ALLOWED",
-                "path": "verification_profile",
-                "detail": "rapid uses the primary-agent review and has no reviewer context",
-            }
-        ]
-    artifacts, errors = collect_current_artifacts(spec)
-    if artifacts is None:
-        return None, errors
-    try:
-        context = build_review_context(
-            page_id=spec["page_id"],
-            review_round=review_round,
-            verification_profile=spec["verification_profile"],
-            content_spec_sha256=content_spec_sha256(spec),
-            artifacts=artifacts.identities,
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        return None, [{"code": "FINAL_IDENTITY_INVALID", "path": "review_context", "detail": str(exc)}]
-    return context, []

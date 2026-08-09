@@ -18,9 +18,9 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 `verification_profile` 必须显式写入每页规格，并在一个批次内固定。
 
 - `rapid`：默认模式。无需 batch runtime preflight；构建、结构和背景是主链，预览是可选诊断。主代理最多集中修复一次。
-- `reviewed`：用户明确要求独立复核时使用。从任务开始到结束都写 `verification_profile=reviewed`，但完整执行 rapid 基础链，再增加全新只读 reviewer Round 1，以及最多一次 reviewer 驱动集中修复和 Round 2 终局复核。
+- `reviewed`：用户明确要求额外视觉审查时使用。从任务开始到结束都写 `verification_profile=reviewed`；完整执行 rapid 基础链后，由主代理再做一次只读视觉审查，并保留最多一次额外集中修复及修复后验证机会。
 
-`rapid` 中，structure、background、内容完整性或主要内容可编辑性失败才阻断草稿交付与 `--draft` 合并。预览不可用时写 `rapid_validation_failed` 并交付已通过前两项验证的草稿；若 preview 已成功生成，字体回退只作诊断。不得把草稿称为独立复核通过版。
+`rapid` 中，structure、background、内容完整性或主要内容可编辑性失败才阻断草稿交付与 `--draft` 合并。预览不可用时写 `rapid_validation_failed` 并交付已通过前两项验证的草稿；若 preview 已成功生成，字体回退只作诊断。不得把草稿称为视觉审查通过版。
 
 ## preferred font
 
@@ -67,13 +67,13 @@ macOS 必须从第一次就把 LibreOffice 放在允许启动应用的执行环�
 
 若预览成功，主代理核对整页 mapping、层级、文字、换行、图形、图表、crop、图标与背景，一次列全 P0/P1；同根因问题合并为一次集中修复。修复后从 prebuild 起重建，并重新执行结构、背景及最多一次预览。字体回退不是修复理由。
 
-## reviewed = rapid + 独立复核
+## reviewed = rapid + 主代理视觉审查
 
-该模式的 prebuild、build、structure 和 background 与 rapid 完全共用，均不传 `--runtime`；只有 structure/background 均为 valid 且绑定当前 PPTX 实际 SHA-256 后，当前 PPTX 才可草稿交付或 `--draft` 合并。preview 只尝试一次，目录为 `preview/<当前PPTX实际SHA-256>`，其中 preview 文件的直接父目录必须是该 hash。首次 command error、`SIGABRT`、无 PDF 或 Poppler 缺失而没有当前 preview 时，不 preflight、不重试、不换字、不重建、不启动 reviewer；写 `reviewed_failed` 并交付草稿。
+该模式的 prebuild、build、structure 和 background 与 rapid 完全共用，均不传 `--runtime`；只有 structure/background 均为 valid 且绑定当前 PPTX 实际 SHA-256 后，当前 PPTX 才可草稿交付或 `--draft` 合并。若 rapid 已生成当前 preview，直接复用；若当前 PPTX 哈希从未尝试 preview，可尝试一次。当前哈希已因 command error、`SIGABRT`、无 PDF 或 Poppler 缺失失败时，不 preflight、不重试、不换字、不重建，写 `reviewed_failed` 并交付草稿。
 
-有当前 preview 时，reviewer 只能读取当前 source、build spec snapshot、当前 PPTX、build report、preview、structure report 和 background report；不要求 runtime/font identity/render report/visual diff/regions。preview 已成功生成时，`pdffonts` mismatch、`matched=false` 或字体 fallback 不阻止 reviewer，且 fallback 本身不是 P0/P1，只有可见裁切、错误换行、溢出或层级差异才评级。Round 1 `passed` 直接做只读轻量身份核对；`changes_required` 且全部 P0/P1 可修复时，按共同根因仅作一次 reviewer 驱动集中修复，然后从 prebuild 重建并生成一次当前 preview，交给全新 Round 2。Round 2 只有 `passed` 可写 `reviewed_passed`；其他结果不修复、不启动 Round 3，写 `reviewed_failed` 并交付草稿。
+有当前 preview 时，主代理进入一次额外的只读 evaluator 阶段，读取当前 source、build spec snapshot、PPTX、build report、preview、structure report 和 background report，整页核对七类视觉 coverage。没有开放 P0/P1 时写 `reviewed_passed`。若一次列全的 P0/P1 均可修复，则按共同根因集中修改 `prepare_spec.py` 一次，从 prebuild 重建并为新 PPTX 哈希至多尝试一次 preview；随后主代理只读复查整页和七类 coverage。复查通过才写 `reviewed_passed`；仍有 P0/P1、preview 不可用或存在不可修复问题时，不再修改、不产生第三次修复，写 `reviewed_failed` 并交付草稿。
 
-主代理 rapid 阶段最多一次修复、reviewer 阶段最多一次修复；这是不转移的编排合同，不新增状态字段或修复计数器。`reviewed_passed` 仅表示当前 PPTX 已通过独立视觉复核和轻量哈希身份核对，不表示 renderer 或字体文件可复现闭环。详细证据与合并规则见[视觉审计与交付](references/visual-audit-and-delivery.md)。
+rapid 基础阶段最多一次修复，reviewed 扩展阶段最多额外一次修复；额度不累积、不转移，也不新增状态机或修复计数器。`reviewed_passed` 仅表示当前 PPTX 通过主代理额外视觉审查和轻量哈希身份核对，不表示外部或第三方审查，也不表示 renderer 或字体文件可复现闭环。详细合同见[视觉审计与交付](references/visual-audit-and-delivery.md)。
 
 ## 多页与交付
 

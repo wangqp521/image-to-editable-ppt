@@ -20,12 +20,9 @@ from xml.etree import ElementTree as ET
 from lib.font_runtime import font_runtime_identity, validate_font_runtime
 from lib.artifact_identity import snapshot_file
 from lib.final_identity import collect_current_artifacts
-from lib.reviewer_contracts import (
-    build_review_context,
-    review_context_sha256,
-    reviewer_response_issues,
-)
+from lib.schema_contracts import unknown_field_detail
 from lib.spec_identity import content_spec_sha256
+from lib.visual_review_contracts import visual_review_record_issues
 
 
 NS = {
@@ -232,6 +229,14 @@ def _validate_reviewed_page_binding(
             actual=input_hash,
             declared=gate_hashes,
         )
+    visual_gate_unknown = unknown_field_detail("VisualGate", visual_gate)
+    if visual_gate_unknown is not None:
+        raise MergeError(
+            "FINAL_REPORT_INVALID",
+            f"Visual gate contains unsupported fields: {page_id}",
+            page_id=page_id,
+            detail=visual_gate_unknown,
+        )
     validator_identity = editability_gate.get("validator")
     validator_path, _, validator_raw = _artifact_identity(
         validator_identity, "VALIDATOR_ARTIFACT_INVALID"
@@ -302,64 +307,23 @@ def _validate_reviewed_page_binding(
             f"Final report current PPTX is stale: {page_id}",
         )
 
-    review_round = visual_gate.get("review_round")
-    bound_context_hash = visual_gate.get("review_context_sha256")
-    reviewer = visual_gate.get("reviewer")
-    response_identity = reviewer.get("response") if isinstance(reviewer, dict) else None
-    outcome = final_report.get("review_outcome")
-    if (
-        type(review_round) is not int
-        or review_round not in {1, 2}
-        or not isinstance(bound_context_hash, str)
-        or not isinstance(reviewer, dict)
-        or set(reviewer) != {"mode", "response"}
-        or reviewer.get("mode") != "independent_read_only_subagent"
-        or not isinstance(response_identity, dict)
-        or not isinstance(outcome, dict)
-        or outcome.get("review_round") != review_round
-        or outcome.get("review_context_sha256") != bound_context_hash
-        or outcome.get("reviewer_response") != response_identity
-        or outcome.get("decision") != "passed"
-    ):
+    review = visual_gate.get("review")
+    if final_report.get("visual_review_outcome") != review:
         raise MergeError(
-            "REVIEW_OUTCOME_INVALID",
-            f"Final review outcome is incomplete or stale: {page_id}",
-        )
-    try:
-        context = build_review_context(
+            "VISUAL_REVIEW_OUTCOME_INVALID",
+            f"Final visual review outcome is stale: {page_id}",
             page_id=page_id,
-            review_round=review_round,
-            verification_profile="reviewed",
-            content_spec_sha256=content_spec_sha256(spec),
-            artifacts=artifacts.identities,
         )
-        current_context_hash = review_context_sha256(context)
-        response_path, response_hash, response_raw = _artifact_identity(
-            response_identity, "REVIEW_OUTCOME_INVALID"
-        )
-        response = json.loads(response_raw.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    review_issues = visual_review_record_issues(
+        review,
+        required_coverage=artifacts.required_coverage,
+    )
+    if review_issues:
         raise MergeError(
-            "REVIEW_OUTCOME_INVALID",
-            f"Reviewer outcome cannot be read: {page_id}",
-        ) from exc
-    if (
-        current_context_hash != bound_context_hash
-        or outcome["reviewer_response"] != {"path": str(response_path), "sha256": response_hash}
-        or reviewer_response_issues(
-            response,
-            expected_context_sha256=current_context_hash,
+            "VISUAL_REVIEW_OUTCOME_INVALID",
+            f"Visual review outcome is invalid: {page_id}",
             page_id=page_id,
-            review_round=review_round,
-            verification_profile="reviewed",
-            required_coverage=artifacts.required_coverage,
-            allowed_evidence=artifacts.allowed_evidence,
-        )
-        or response.get("decision") != "passed"
-    ):
-        raise MergeError(
-            "REVIEW_OUTCOME_INVALID",
-            f"Reviewer response does not bind the current reviewed page: {page_id}",
+            errors=review_issues,
         )
     pptx_path, pptx_hash, pptx_raw = _artifact_identity(
         final_pptx,
@@ -377,11 +341,12 @@ def _validate_reviewed_page_binding(
         "profile_passed": True,
         "validation": validator_report,
         "pptx_raw": pptx_raw,
-        "review_identity": {
+        "visual_review_identity": {
             "page_id": page_id,
-            "review_round": review_round,
-            "review_context_sha256": current_context_hash,
-            "reviewer_response_sha256": response_hash,
+            "current_pptx_sha256": input_hash,
+            "preview_sha256": artifacts.identities["preview"]["sha256"],
+            "repair_applied": review["repair_applied"],
+            "post_repair_verification": review["post_repair_verification"],
         },
     }
 
@@ -843,14 +808,14 @@ def merge_presentations(
         "delivery_label": (
             "可编辑草稿"
             if draft
-            else "独立复核通过版"
+            else "视觉审查通过版"
         ),
         "imported_slide_parts": imported_parts,
         "validation": validation,
     }
     if not draft:
-        result["review_identity"] = [
-            binding["review_identity"] for binding in page_bindings
+        result["visual_review_identity"] = [
+            binding["visual_review_identity"] for binding in page_bindings
         ]
     return result
 

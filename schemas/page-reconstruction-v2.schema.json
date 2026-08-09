@@ -2502,22 +2502,6 @@
       ],
       "type": "object"
     },
-    "ReviewerBinding": {
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "const": "independent_read_only_subagent"
-        },
-        "response": {
-          "$ref": "#/$defs/Reference"
-        }
-      },
-      "required": [
-        "mode",
-        "response"
-      ],
-      "type": "object"
-    },
     "RuntimePreflight": {
       "additionalProperties": false,
       "properties": {
@@ -3155,33 +3139,9 @@
           ]
         },
         "review": {
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "review_context_sha256": {
           "anyOf": [
             {
-              "pattern": "^[0-9a-fA-F]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "review_round": {
-          "enum": [
-            null,
-            1,
-            2
-          ]
-        },
-        "reviewer": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ReviewerBinding"
+              "$ref": "#/$defs/VisualReviewRecord"
             },
             {
               "type": "null"
@@ -3205,6 +3165,94 @@
         "tripwire"
       ],
       "type": "object"
+    },
+    "VisualReviewCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "canvas_and_regions": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "graphics_connectors_charts": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "high_risk_regions": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "objects_and_geometry": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "pictures_crop_layers": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "tables_and_matrices": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        },
+        "text_and_typography": {
+          "enum": [
+            "checked",
+            "not_applicable"
+          ]
+        }
+      },
+      "required": [
+        "canvas_and_regions",
+        "graphics_connectors_charts",
+        "high_risk_regions",
+        "objects_and_geometry",
+        "pictures_crop_layers",
+        "tables_and_matrices",
+        "text_and_typography"
+      ],
+      "type": "object"
+    },
+    "VisualReviewRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/VisualReviewCoverage"
+        },
+        "decision": {
+          "const": "passed"
+        },
+        "mode": {
+          "const": "main_agent_read_only_visual_audit"
+        },
+        "post_repair_verification": {
+          "enum": [
+            "not_required",
+            "passed"
+          ]
+        },
+        "repair_applied": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "coverage",
+        "decision",
+        "mode",
+        "post_repair_verification",
+        "repair_applied"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://schemas.openai.local/ia-image-to-editable-ppt/page-reconstruction-v2.schema.json",
@@ -3213,5 +3261,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "6b5d9c3f49cf0a266a77d1a1abc165026e2382f308221920d0e97c43c98bfc7f"
+  "x-schema-contract-sha256": "488da828031325b69505a2adc2566180e5f20f80f43afe1ce9655308d6e1c5f5"
 }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -18,7 +19,7 @@ from typing import Any
 from PIL import Image, UnidentifiedImageError
 
 from lib.atomic_write import atomic_write_bytes
-from lib.artifact_identity import is_sha256, snapshot_file
+from lib.artifact_identity import is_sha256
 from lib.hashing import canonical_json_sha256, file_sha256
 from lib.background_contracts import (
     resolved_element_mode_map,
@@ -36,11 +37,6 @@ from lib.error_codes import ToolError
 from lib.final_identity import collect_current_artifacts
 from lib.font_runtime import validate_font_runtime
 from lib.representation_contracts import require_asset, validate_representation_plan
-from lib.reviewer_contracts import (
-    build_review_context,
-    review_context_sha256,
-    reviewer_response_issues,
-)
 from lib.schema_io import (
     NonStandardJsonNumberError,
     non_finite_number_paths,
@@ -54,6 +50,7 @@ from lib.schema_contracts import (
     unknown_field_detail,
 )
 from lib.spec_identity import content_spec_sha256
+from lib.visual_review_contracts import visual_review_record_issues
 
 
 ALLOWED_KINDS = {
@@ -597,58 +594,6 @@ def _module_element_references(value: Any) -> set[str]:
         for child in value:
             references.update(_module_element_references(child))
     return references
-
-
-def _validate_gate_artifact(
-    value: Any,
-    path: str,
-    errors: list[dict[str, str]],
-) -> tuple[str, str, bytes] | None:
-    if not isinstance(value, dict):
-        _error(errors, "SPEC_GATE_ARTIFACT_MISSING", path, "artifact identity is required")
-        return None
-    artifact_path = value.get("path")
-    digest = value.get("sha256")
-    if not isinstance(artifact_path, str) or not artifact_path or not Path(artifact_path).is_absolute():
-        _error(errors, "SPEC_GATE_ARTIFACT_INVALID", f"{path}.path", "artifact path must be absolute")
-        return None
-    if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
-        _error(errors, "SPEC_GATE_ARTIFACT_INVALID", f"{path}.sha256", "artifact sha256 must contain 64 hex characters")
-        return None
-    resolved = Path(artifact_path).expanduser().resolve()
-    if not resolved.is_file():
-        _error(errors, "SPEC_GATE_ARTIFACT_NOT_FOUND", f"{path}.path", "artifact file does not exist")
-        return None
-    try:
-        raw, snapshot = snapshot_file(resolved, path)
-    except ToolError:
-        _error(errors, "SPEC_GATE_ARTIFACT_NOT_FOUND", f"{path}.path", "artifact file is missing or unstable")
-        return None
-    actual = snapshot.sha256
-    if actual.lower() != digest.lower():
-        _error(errors, "SPEC_GATE_ARTIFACT_HASH_MISMATCH", path, "artifact sha256 does not match current file")
-        return None
-    return str(snapshot.original_path), actual.lower(), raw
-
-
-def _load_json_artifact(
-    artifact: tuple[str, str, bytes] | None,
-    *,
-    code: str,
-    path: str,
-    errors: list[dict[str, str]],
-) -> dict[str, Any] | None:
-    if artifact is None:
-        return None
-    try:
-        payload = json.loads(artifact[2].decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError):
-        _error(errors, code, path, "artifact must contain valid JSON")
-        return None
-    if not isinstance(payload, dict):
-        _error(errors, code, path, "artifact root must be an object")
-        return None
-    return payload
 
 
 def _validate_coverage(
@@ -1433,89 +1378,34 @@ def _identity_only_final(
         "content_spec_sha256": content_spec_sha256(spec),
         "delivery_status": spec.get("delivery_status"),
     }
-    if artifacts is None:
-        return summary
-    summary["current_pptx"] = artifacts.identities["current_pptx"]
-
-    review_round = visual_gate.get("review_round")
-    reviewer = visual_gate.get("reviewer")
-    bound_context_hash = visual_gate.get("review_context_sha256")
-    if verification_profile == "rapid":
-        for field, value in (
-            ("review_round", review_round),
-            ("reviewer", reviewer),
-            ("review_context_sha256", bound_context_hash),
-        ):
-            if value is not None:
-                _error(errors, "SPEC_RAPID_REVIEWER_FORBIDDEN", f"visual_gate.{field}", "rapid must not carry reviewer state")
-    else:
-        summary["current_artifacts"] = artifacts.identities
-        if type(review_round) is not int or review_round not in {1, 2}:
-            _error(errors, "SPEC_VISUAL_REVIEW_ROUND_INVALID", "visual_gate.review_round", "review round must be 1 or 2")
-        if not is_sha256(bound_context_hash):
-            _error(errors, "REVIEW_RESPONSE_CONTEXT_MISMATCH", "visual_gate.review_context_sha256", "current review context hash is required")
-        if (
-            not isinstance(reviewer, dict)
-            or set(reviewer) != {"mode", "response"}
-            or reviewer.get("mode") != "independent_read_only_subagent"
-        ):
-            _error(errors, "SPEC_INDEPENDENT_VISUAL_REVIEW_REQUIRED", "visual_gate.reviewer", "raw independent reviewer response is required")
-        if type(review_round) is int and review_round in {1, 2}:
-            try:
-                context = build_review_context(
-                    page_id=spec["page_id"],
-                    review_round=review_round,
-                    verification_profile=verification_profile,
-                    content_spec_sha256=content_spec_sha256(spec),
-                    artifacts=artifacts.identities,
-                )
-                current_context_hash = review_context_sha256(context)
-            except (KeyError, TypeError, ValueError) as exc:
-                _error(errors, "REVIEW_RESPONSE_CONTEXT_MISMATCH", "visual_gate.review_context_sha256", str(exc))
-                current_context_hash = None
-            if current_context_hash != bound_context_hash:
-                _error(errors, "REVIEW_RESPONSE_CONTEXT_MISMATCH", "visual_gate.review_context_sha256", "review context does not bind current artifacts")
-            response_record = reviewer.get("response") if isinstance(reviewer, dict) else None
-            response_artifact = _validate_gate_artifact(
-                response_record,
-                "visual_gate.reviewer.response",
-                errors,
-            )
-            response = _load_json_artifact(
-                response_artifact,
-                code="REVIEW_RESPONSE_INVALID",
-                path="visual_gate.reviewer.response",
-                errors=errors,
-            )
-            if response is not None and current_context_hash is not None:
-                response_errors = reviewer_response_issues(
-                    response,
-                    expected_context_sha256=current_context_hash,
-                    page_id=spec["page_id"],
-                    review_round=review_round,
-                    verification_profile=verification_profile,
-                    required_coverage=artifacts.required_coverage,
-                    allowed_evidence=artifacts.allowed_evidence,
-                )
-                errors.extend(response_errors)
-                if response.get("decision") != "passed":
-                    _error(errors, "SPEC_OPEN_BLOCKING_DIFFERENCE", "visual_gate.reviewer.response", "non-passing reviewer decision blocks delivery")
-                elif not response_errors and response_artifact is not None:
-                    summary["review_outcome"] = {
-                        "review_round": review_round,
-                        "review_context_sha256": current_context_hash,
-                        "reviewer_response": {
-                            "path": response_artifact[0],
-                            "sha256": response_artifact[1],
-                        },
-                        "decision": "passed",
-                    }
-
     high_risk = spec.get("modules", {}).get("high_risk") if isinstance(spec.get("modules"), dict) else None
     items = high_risk.get("items", []) if isinstance(high_risk, dict) else []
     for index, item in enumerate(items if isinstance(items, list) else []):
         if isinstance(item, dict) and item.get("severity") in {"P0", "P1"} and item.get("result") != "passed":
             _error(errors, "SPEC_OPEN_BLOCKING_DIFFERENCE", f"modules.high_risk.items[{index}]", "open P0/P1 blocks final delivery")
+
+    if artifacts is None:
+        return summary
+    summary["current_pptx"] = artifacts.identities["current_pptx"]
+
+    review = visual_gate.get("review")
+    if verification_profile == "rapid":
+        if review is not None:
+            _error(
+                errors,
+                "SPEC_RAPID_VISUAL_REVIEW_FORBIDDEN",
+                "visual_gate.review",
+                "rapid must not carry the reviewed extension visual audit",
+            )
+    else:
+        review_issues = visual_review_record_issues(
+            review,
+            required_coverage=artifacts.required_coverage,
+        )
+        errors.extend(review_issues)
+        if not review_issues:
+            summary["current_artifacts"] = artifacts.identities
+            summary["visual_review_outcome"] = copy.deepcopy(review)
     return summary
 
 

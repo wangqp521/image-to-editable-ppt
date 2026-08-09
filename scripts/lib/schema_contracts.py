@@ -1128,22 +1128,35 @@ _RECORDS: dict[str, dict[str, Any]] = {
         },
         examples=[_TEXT_EXAMPLE, _SHAPE_EXAMPLE, _PICTURE_EXAMPLE],
     ),
-    "ReviewerBinding": _object(
+    "VisualReviewCoverage": _object(
         {
-            "mode": {"const": "independent_read_only_subagent"},
-            "response": _ref("Reference"),
-        },
-        required={"mode", "response"},
+            field: {"enum": ["checked", "not_applicable"]}
+            for field in (
+                "canvas_and_regions",
+                "objects_and_geometry",
+                "text_and_typography",
+                "tables_and_matrices",
+                "graphics_connectors_charts",
+                "pictures_crop_layers",
+                "high_risk_regions",
+            )
+        }
+    ),
+    "VisualReviewRecord": _object(
+        {
+            "mode": {"const": "main_agent_read_only_visual_audit"},
+            "decision": {"const": "passed"},
+            "coverage": _ref("VisualReviewCoverage"),
+            "repair_applied": BOOLEAN,
+            "post_repair_verification": {"enum": ["not_required", "passed"]},
+        }
     ),
     "VisualGate": _object(
         {
             "status": NON_EMPTY_STRING,
             "evidence": _array(NON_EMPTY_STRING),
             "tripwire": {"type": ["object", "null"]},
-            "review_round": {"enum": [None, 1, 2]},
-            "review": {"type": ["object", "null"]},
-            "reviewer": {"anyOf": [_ref("ReviewerBinding"), {"type": "null"}]},
-            "review_context_sha256": {"anyOf": [SHA256, {"type": "null"}]},
+            "review": {"anyOf": [_ref("VisualReviewRecord"), {"type": "null"}]},
             "pptx": {"type": ["object", "null"]},
             "preview": {"type": ["object", "null"]},
             "report": {"type": ["object", "null"]},
@@ -1370,6 +1383,7 @@ EXACT_SCHEMA_ENVELOPE_RECORDS = frozenset(
         "PageLayoutModule",
         "CoordinateOverlayEvidence",
         "Region",
+        "VisualGate",
     }
 )
 _ENVELOPE_ID_FIELDS = {"Region": "region_id"}

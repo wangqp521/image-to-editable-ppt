@@ -36,11 +36,11 @@
 | 模式 | 触发方式 | 适用场景 |
 |---|---|---|
 | `rapid` | 默认 | 日常转换，structure/background 均 valid 且绑定当前 PPTX 哈希后具备草稿交付资格，预览只作一次可选检查 |
-| `reviewed` | 明确要求“独立复核” | 从开始即标记 `reviewed`，完整执行 rapid 基础流程后增加最多两轮独立复核 |
+| `reviewed` | 明确要求额外视觉审查 | 从开始即标记 `reviewed`，完整执行 rapid 基础流程后增加一次主代理视觉审查和最多一次额外集中修复 |
 
-`rapid` 由主代理检查并最多集中修复一次。`reviewed` 先完整执行这套基础流程，再进行 reviewer round 1；若 round 1 发现可修复 P0/P1，允许一次额外集中修复和 round 2 终局复核。round 2 后不再修复，也不存在第三轮。
+`rapid` 由主代理检查并最多集中修复一次。`reviewed` 先完整执行这套基础流程，再由主代理只读核对当前 source/preview；若发现可修复 P0/P1，允许一次额外集中修复和一次修复后全页验证。验证后不再修复。
 
-structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed_failed` 也必须交付当前 PPTX 草稿。command error、`SIGABRT`、无 PDF 或 Poppler 缺失而无 preview 时，不会重试 renderer、运行时预检、换字、重建或启动 reviewer；只披露实际存在的 preview、reviewer response 和问题报告。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 不阻止 reviewer；字体 fallback 本身不单独构成 P0/P1。只有 `reviewed_passed` 页面可纳入独立复核通过版。
+structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed_failed` 也必须交付当前 PPTX 草稿。command error、`SIGABRT`、无 PDF 或 Poppler 缺失而无 preview 时，同一当前哈希不会重试 renderer、运行时预检、换字或重建；只披露实际存在的 preview 和问题报告。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 不阻止视觉审查；字体 fallback 本身不单独构成 P0/P1。只有 `reviewed_passed` 页面可纳入视觉审查通过版。
 
 ## 单页使用
 
@@ -64,7 +64,7 @@ structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed
 6. 输出文件名为“单页还原_可编辑版.pptx”。
 ```
 
-也可以直接提供本地图片路径，例如 `/path/to/slide.png`。需要独立复核时，在提示词中明确写“使用 reviewed 模式”或“独立复核”。
+也可以直接提供本地图片路径，例如 `/path/to/slide.png`。需要额外视觉审查时，在提示词中明确写“使用 reviewed 模式”。
 
 ## 多页使用
 
@@ -81,7 +81,7 @@ structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed
 使用 $image-to-editable-ppt，把上传的 01—08 页图片按顺序还原成一份可编辑 PPTX。
 
 要求：
-1. 全部页面使用 reviewed 独立复核模式；
+1. 全部页面使用 reviewed 视觉审查模式；
 2. 保持原图内容、配色、字号层级和相对位置；
 3. 主要文字、数字、表格、流程图和基础图形可编辑；
 4. Logo、照片和复杂装饰可以使用局部图片；
@@ -89,7 +89,7 @@ structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed
 6. 最终文件名为“项目汇报_可编辑版.pptx”。
 ```
 
-多页任务按输入顺序逐页处理。`reviewed_passed` 页面使用 input/spec/final-report 成功合并；rapid 与 `reviewed_failed` 页面只能在代理调用前确认 structure/background 均 valid 且绑定当前 PPTX 哈希后使用 draft merge。draft merger 自身只重跑输入 PPTX 的结构校验并验证合并后的 deck，不接收或重验 background 报告。符合上述资格、但 preview 或 reviewer 未通过的页面仍作为明确标注的草稿交付，不会被删除或隐藏。
+多页任务按输入顺序逐页处理。`reviewed_passed` 页面使用 input/spec/final-report 成功合并；rapid 与 `reviewed_failed` 页面只能在代理调用前确认 structure/background 均 valid 且绑定当前 PPTX 哈希后使用 draft merge。draft merger 自身只重跑输入 PPTX 的结构校验并验证合并后的 deck，不接收或重验 background 报告。符合上述资格、但 preview 或视觉审查未通过的页面仍作为明确标注的草稿交付，不会被删除或隐藏。
 
 ## 需要提供的信息
 
@@ -109,11 +109,11 @@ structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed
 - 单页或多页可编辑 `.pptx`；
 - 实际生成的当前页面预览和源图对照；
 - 结构与视觉校验结果；
-- 当前验证模式要求的复核证据；
+- 当前验证模式要求的视觉审查证据；
 - 字体替代、视觉近似和未验证内容说明；
 - 多页任务还会交付按输入顺序合并的最终演示文稿。
 
-验证通过和未通过的版本会使用清晰标签区分，例如“快速校验版”“独立复核通过版”或对应的“未通过版”。
+验证通过和未通过的版本会使用清晰标签区分，例如“快速校验版”“视觉审查通过版”或对应的“未通过版”。
 
 ## 系统运行时依赖
 
@@ -138,4 +138,4 @@ structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed
 - 模糊、遮挡、透视严重或分辨率过低会降低文字与结构还原精度；
 - 缺少原字体可能导致字宽、换行和渲染差异，并会在交付说明中披露；字体 fallback 本身不单独构成 P0/P1；
 - 同一批页面不能混用验证模式；
-- 仅当 structure/background 均 valid 且绑定当前 PPTX 哈希时，页面才可交付或参与草稿合并；preview、reviewer 与字体软失败不扣留该草稿；structure/background 硬失败时保留诊断，但不交付该页草稿。
+- 仅当 structure/background 均 valid 且绑定当前 PPTX 哈希时，页面才可交付或参与草稿合并；preview、视觉审查与字体软失败不扣留该草稿；structure/background 硬失败时保留诊断，但不交付该页草稿。
