@@ -13,6 +13,8 @@
 
 structure/background 报告必须均为 valid 并绑定当前 PPTX 哈希。任一报告无效或哈希未绑定，以及 PPTX 无法打开、页数/比例错误、结构损坏、核心内容缺失、数据编造、主要内容不可编辑、TextBox/Run 覆盖错误或图片化范围违反表示计划，都是硬失败，不能进入草稿交付或合并。
 
+rapid 与 reviewed 对同一当前 PPTX 哈希完全共用 preview 执行机制；两者只在终态语义上不同：rapid 的 preview 是可选诊断，reviewed 必须有当前 preview 才能形成视觉候选通过结果。
+
 预览只在有助于视觉检查时运行，输出目录为 `preview/PPTX_SHA256`，其中 `PPTX_SHA256` 必须替换为当前 PPTX 的实际 SHA-256；preview 文件的直接父目录必须正是该 hash：
 
 ```bash
@@ -40,7 +42,7 @@ python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans
 6. `pictures_crop_layers`
 7. `high_risk_regions`
 
-一次审查整页 mapping、区域比例、层级、文字、换行、图形、表格、图表、crop、图片、图标与背景，并一次列全问题：
+一次审查整页 mapping、区域比例、层级、文字、换行、图形、表格、图表、crop、图片、图标与背景，同时一次性产生七类 coverage 并一次列全问题；coverage 是该次整页审查的结果，不是额外审查轮次、producer、状态或修复机会：
 
 - P0：PPTX 不可用、核心内容缺失、主要内容不可编辑、数据编造；
 - P1：数量、比例、结构、fill、字号/换行、行/段距、框内位置、Text Run、bullet、crop、connector、图表或关键装饰错误；
@@ -72,11 +74,13 @@ python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans
 
 额外审查发现 P0/P1 时，先一次列全并按共同根因合并。存在不可修复 P0/P1 时不消费额外修复机会，直接写 `reviewed_failed`。全部 P0/P1 可修复时，只允许一次额外集中修改 `prepare_spec.py`；随后以新哈希从 prebuild 起重建 build、structure、background，并为新 PPTX 哈希至多尝试一次 preview。不得逐项边看边改、沿用旧哈希报告或把未使用的 rapid 修复机会转入 reviewed。
 
-修复后验证仍由主代理只读完成，必须重新核对整页和全部七类 coverage，而不是只看已修区域。验证通过时写 `repair_applied=true`、`post_repair_verification=passed` 和 `reviewed_passed`。仍有 P0/P1、当前 preview 不可用或证据身份不一致时，写 `reviewed_failed`，不得再修改 content spec、PPTX 或 build content，也不得产生第三次修复。
+修复后验证仍由主代理只读完成，只执行一次整页视觉复查，并在同一次复查中一次性产生七类 coverage，而不是只看已修区域，也不得在整页复查之后另起 coverage 阶段。复查通过时写 `repair_applied=true`、`post_repair_verification=passed` 并进入轻量七产物 Final 身份核对。仍有 P0/P1、当前 preview 不可用或证据身份不一致时，写 `reviewed_failed`，不得再修改 content spec、PPTX 或 build content，也不得产生第三次修复。
 
 ## Final、合并与交付
 
-`reviewed_passed` 的 final 重新读取七类当前产物，核对 source/spec/PPTX/build/preview/structure/background 的路径、SHA-256 和交叉身份，并要求 `final_report.visual_review_outcome == visual_gate.review`。它不要求 runtime preflight、字体 face/identity、render report、visual diff 或 region evidence。
+视觉审查没有开放 P0/P1 时才运行轻量七产物 Final。Final 重新读取 source/spec/PPTX/build/preview/structure/background，核对路径、SHA-256 和交叉身份，并要求 `final_report.visual_review_outcome == visual_gate.review`；只有 Final 通过才写 `reviewed_passed`。它不要求 runtime preflight、字体 face/identity、render report、visual diff 或 region evidence。
+
+已知视觉失败时不运行成功 Final，直接写 `reviewed_failed` 并使用 rapid 的 `--draft`。视觉候选通过但 Final 发现任一身份过期或不一致时，Final 返回失败且不生成成功报告；页面只能写既有状态 `reviewed_failed`，不得派生 `reviewed_failed_draft_deliverable` 等新 delivery status，并进入同一 draft 分流。
 
 `reviewed_passed` 页面使用 input/spec/final-report 成功合并，结果标签为“视觉审查通过版”。rapid 和 `reviewed_failed` 页面在 structure/background 均 valid 且绑定当前 PPTX 哈希时只能使用 draft merger：
 

@@ -69,11 +69,13 @@ macOS 必须从第一次就把 LibreOffice 放在允许启动应用的执行环�
 
 ## reviewed = rapid + 主代理视觉审查
 
-该模式的 prebuild、build、structure 和 background 与 rapid 完全共用，均不传 `--runtime`；只有 structure/background 均为 valid 且绑定当前 PPTX 实际 SHA-256 后，当前 PPTX 才可草稿交付或 `--draft` 合并。若 rapid 已生成当前 preview，直接复用；若当前 PPTX 哈希从未尝试 preview，可尝试一次。当前哈希已因 command error、`SIGABRT`、无 PDF 或 Poppler 缺失失败时，不 preflight、不重试、不换字、不重建，写 `reviewed_failed` 并交付草稿。
+该模式的 prebuild、build、structure 和 background 与 rapid 完全共用，均不传 `--runtime`；只有 structure/background 均为 valid 且绑定当前 PPTX 实际 SHA-256 后，当前 PPTX 才可草稿交付或 `--draft` 合并。rapid 与 reviewed 对同一当前 PPTX 哈希完全共用 preview 执行机制：若 rapid 已生成当前 preview，直接复用；若当前哈希从未尝试 preview，可尝试一次。当前哈希已因 command error、`SIGABRT`、无 PDF 或 Poppler 缺失失败时，不 preflight、不重试、不换字、不重建，写 `reviewed_failed` 并交付草稿。
 
-有当前 preview 时，主代理进入一次额外的只读 evaluator 阶段，读取当前 source、build spec snapshot、PPTX、build report、preview、structure report 和 background report，整页核对七类视觉 coverage。没有开放 P0/P1 时写 `reviewed_passed`。若一次列全的 P0/P1 均可修复，则按共同根因集中修改 `prepare_spec.py` 一次，从 prebuild 重建并为新 PPTX 哈希至多尝试一次 preview；随后主代理只读复查整页和七类 coverage。复查通过才写 `reviewed_passed`；仍有 P0/P1、preview 不可用或存在不可修复问题时，不再修改、不产生第三次修复，写 `reviewed_failed` 并交付草稿。
+有当前 preview 时，主代理进入一次额外的只读 evaluator 阶段，读取当前 source、build spec snapshot、PPTX、build report、preview、structure report 和 background report，在一次整页视觉审查中同时产生七类 coverage。若一次列全的 P0/P1 均可修复，则按共同根因集中修改 `prepare_spec.py` 一次，从 prebuild 重建并为新 PPTX 哈希至多尝试一次 preview。修复后只执行一次整页视觉复查，并在同一次复查中一次性产生七类 coverage；不得在整页复查之后另起 coverage 阶段。仍有 P0/P1、preview 不可用或存在不可修复问题时，不再修改、不产生第三次修复，写 `reviewed_failed` 并交付草稿。
 
-rapid 基础阶段最多一次修复，reviewed 扩展阶段最多额外一次修复；额度不累积、不转移，也不新增状态机或修复计数器。`reviewed_passed` 仅表示当前 PPTX 通过主代理额外视觉审查和轻量哈希身份核对，不表示外部或第三方审查，也不表示 renderer 或字体文件可复现闭环。详细合同见[视觉审计与交付](references/visual-audit-and-delivery.md)。
+视觉审查没有开放 P0/P1 时才进入轻量七产物 Final 身份核对；只有 Final 通过才写 `reviewed_passed`。已知视觉失败时不运行成功 Final。视觉候选通过但 Final 发现任一身份过期或不一致时，Final 返回失败且不生成成功报告，页面只能写既有状态 `reviewed_failed`，不得派生新的 delivery status；只要硬门禁仍通过，就直接沿用 rapid 的 `--draft` 草稿路径。
+
+rapid 基础阶段最多一次修复，reviewed 扩展阶段最多额外一次修复；额度不累积、不转移，也不新增状态机、独立 reviewer、visual diff、runtime preflight、额外渲染或修复计数器。`reviewed_passed` 仅表示当前 PPTX 通过主代理额外视觉审查和轻量哈希身份核对，不表示外部或第三方审查，也不表示 renderer 或字体文件可复现闭环。详细合同见[视觉审计与交付](references/visual-audit-and-delivery.md)。
 
 ## 多页与交付
 
