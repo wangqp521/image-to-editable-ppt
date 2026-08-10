@@ -17,8 +17,8 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 `verification_profile` 必须显式写入每页规格，并在一个批次内固定。
 
-- `rapid`：默认模式。读取[rapid 交付](references/rapid-delivery.md)；无需 batch runtime preflight，构建、结构和背景是主链，preview 只作可选诊断且不进行视觉判读。只有确定性硬门禁失败才允许一次集中修复。
-- `reviewed`：用户明确要求额外视觉审查时使用。从任务开始到结束都写 `verification_profile=reviewed`；完整执行 rapid 基础链后，再读取[reviewed 视觉审查](references/reviewed-visual-audit.md)，进行一次整页视觉复核、最多一次额外集中修复及一次修复后验证。
+- `rapid`：默认模式。读取[rapid 交付](references/rapid-delivery.md)；无需 batch runtime preflight。完成构建、structure/background 与内容硬门禁后，当前哈希 preview 最多尝试一次；preview 可用时由主代理执行首次整页语义判断并一次列全 P0/P1，最多允许一次基础集中修复。修复后重建自动证据、为新哈希最多生成一次 preview，再执行一次修复后终局语义复核；该复核只作终局判定，不得触发第二次修复。
+- `reviewed`：用户明确要求额外视觉审查时使用。从任务开始到结束都写 `verification_profile=reviewed`；两种模式共享构建、硬门禁、首次 preview、首次语义判断、最多一次基础集中修复及其新哈希 preview。随后读取[reviewed 视觉审查](references/reviewed-visual-audit.md)；首次七类 coverage 审查同时吸收基础修复后的终局复核，不额外增加判断轮次，并保留最多一次 reviewed 专属额外集中修复及一次修复后视觉验证。
 
 `rapid` 中，structure、background、内容完整性或主要内容可编辑性失败才阻断草稿交付与 `--draft` 合并。预览不可用时写 `rapid_validation_failed` 并交付已通过前两项验证的草稿；若 preview 已成功生成，字体回退只作诊断。不得把草稿称为视觉审查通过版。
 
@@ -64,11 +64,13 @@ python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans
 
 macOS 必须从第一次就把 LibreOffice 放在允许启动应用的执行环境中运行；脚本使用独立可写 profile 和进程锁。`rapid` 直接预览只尝试一次：command error、`SIGABRT`、无 PDF 或 Poppler 缺失时记录为 preview 不可用，不重试、不运行 visual diff，继续交付已通过 structure/background 的 PPTX。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 仅记录诊断，不能否定该 preview。
 
-rapid 只确认 preview 文件存在、直接父目录为当前 PPTX 哈希且诊断报告绑定当前字节；不进行视觉判读，不把 source 与 preview 作整页对照，不产生视觉 finding，也不因 preview 修改 `prepare_spec.py`、发起第二次渲染或运行 reviewed Final。structure/background 与内容、可编辑性硬门禁通过后立即进入草稿交付。
+当前哈希 preview 可用时，主代理执行且只执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、换行、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 或 preview 不可用时写 `rapid_validation_failed`。
 
-## reviewed = rapid + 主代理视觉审查
+全部 P0/P1 可修复时，最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。新 preview 可用时，主代理再执行一次修复后终局语义复核，只检查已知问题是否关闭及是否新增 P0/P1。该复核不得触发第二次修复、再次渲染或 reviewed Final；无开放 P0/P1 时写 `rapid_validated`，仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。
 
-只有 `verification_profile=reviewed` 才读取并执行[reviewed 视觉审查](references/reviewed-visual-audit.md)。先完整完成 rapid 基础链；随后取得当前哈希 preview，执行一次整页视觉审查。全部 P0/P1 可修复时，最多进行一次额外集中修复、按新哈希重建并执行一次修复后验证。rapid 不得读取或执行该 reference。
+## reviewed 共享基础阶段 + 专属尾链
+
+只有 `verification_profile=reviewed` 才读取并执行[reviewed 视觉审查](references/reviewed-visual-audit.md)。两种模式共享构建、硬门禁、首次 preview、一次初始整页语义判断、最多一次基础集中修复及其新哈希 preview；reviewed 不执行 rapid 专属的终局复核与 rapid 终态。其首次七类 coverage 整页审查同时承担基础修复后的终局语义复核，不额外增加视觉判断轮次。审查发现的全部 P0/P1 可修复时，最多进行一次 reviewed 专属额外集中修复、按新哈希重建并执行一次修复后验证。rapid 不得读取或执行该 reference。
 
 ## 多页与交付
 

@@ -35,10 +35,10 @@
 
 | 模式 | 触发方式 | 适用场景 |
 |---|---|---|
-| `rapid` | 默认 | 日常转换，structure/background 均 valid 且绑定当前 PPTX 哈希后具备草稿交付资格，预览只作一次可选检查 |
-| `reviewed` | 明确要求额外视觉审查 | 从开始即标记 `reviewed`，完整执行 rapid 基础流程后增加一次主代理视觉审查和最多一次额外集中修复 |
+| `rapid` | 默认 | 日常转换：一次初始整页语义判断，最多一次基础集中修复，修复后再作一次终局判断，不得再次修复 |
+| `reviewed` | 明确要求额外视觉审查 | 从开始即标记 `reviewed`；完成共享基础阶段后执行七类 coverage 审查，保留最多一次 reviewed 专属额外集中修复 |
 
-`rapid` 由主代理检查并最多集中修复一次。`reviewed` 先完整执行这套基础流程，再由主代理只读核对当前 source/preview；若发现可修复 P0/P1，允许一次额外集中修复和一次修复后全页验证。验证后不再修复。
+`rapid` 由主代理执行一次初始判断，最多集中修复一次；若实施修复，为新哈希生成 preview 后执行一次终局判断，此后不得再次修复。`reviewed` 共享构建、硬门禁、首次 preview、初始判断和最多一次基础修复；随后执行当前七类 coverage 审查。若发生基础修复，首次七类审查同时完成其终局复核，不增加额外判断轮次；此后仍保留最多一次 reviewed 专属额外集中修复和一次修复后全页验证，验证后不再修复。
 
 structure/background 均 valid 且绑定当前 PPTX 哈希后，即使 `reviewed_failed` 也必须交付当前 PPTX 草稿。command error、`SIGABRT`、无 PDF 或 Poppler 缺失而无 preview 时，同一当前哈希不会重试 renderer、运行时预检、换字或重建；只披露实际存在的 preview 和问题报告。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 不阻止视觉审查；字体 fallback 本身不单独构成 P0/P1。只有 `reviewed_passed` 页面可纳入视觉审查通过版。
 
