@@ -1351,6 +1351,7 @@ _RECORDS["PageReconstruction"] = _object(
         "schema_version",
         "page_id",
         "verification_profile",
+        "delivery_status",
         "session_reuse",
         "content_reference",
         "clean_visual_reference",

@@ -15,7 +15,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 ## 验证模式
 
-`verification_profile` 必须显式写入每页规格，并在一个批次内固定。
+`verification_profile` 和 `delivery_status` 必须显式写入每页规格。`verification_profile` 在一个批次内固定；每次首次或修复后重新进入 prebuild 前，页面专用 `prepare_spec.py` 必须写 `delivery_status=pending`。不得依赖验证器补默认值。prebuild 冻结后只由页面专用 `finalize_spec.py` 把状态改为当前 profile 的终态：rapid 使用 `rapid_validated|rapid_validation_failed`，reviewed 使用 `reviewed_passed|reviewed_failed`。
 
 - `rapid`：默认模式。读取[rapid 交付](references/rapid-delivery.md)；无需 batch runtime preflight。完成构建、structure/background 与内容硬门禁后，当前哈希 preview 最多尝试一次；preview 可用时由主代理执行首次整页语义判断并一次列全 P0/P1，最多允许一次基础集中修复。修复后重建自动证据、为新哈希最多生成一次 preview，再执行一次修复后终局语义复核；该复核只作终局判定，不得触发第二次修复。
 - `reviewed`：用户明确要求额外视觉审查时使用。从任务开始到结束都写 `verification_profile=reviewed`；两种模式共享构建、硬门禁、首次 preview、首次语义判断、最多一次基础集中修复及其新哈希 preview。随后读取[reviewed 视觉审查](references/reviewed-visual-audit.md)；首次七类 coverage 审查同时吸收基础修复后的终局复核，不额外增加判断轮次，并保留最多一次 reviewed 专属额外集中修复及一次修复后视觉验证。

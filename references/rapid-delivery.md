@@ -4,6 +4,8 @@
 
 本文件定义 rapid 专属的停止与交付合同。只有 `verification_profile=rapid` 时才读取本文件；`reviewed` 不读取、不继承 rapid 专属终态尾链，而是按其独立 reference 执行共享基础阶段和 reviewed 专属尾链。
 
+每次首次或修复后重新进入 prebuild 前，页面规格必须显式写 `delivery_status=pending`；验证器不补默认值。完成视觉判断后只写 rapid 终态：`rapid_validated` 或 `rapid_validation_failed`。
+
 ## 草稿资格
 
 prebuild、build、structure 和 background 均不传 `--runtime`。structure/background、内容完整性和主要内容可编辑性硬门禁必须全部通过并绑定当前 PPTX 实际 SHA-256；TextBox/Run、图片化范围和 PPTX 可打开性也必须满足硬门禁。

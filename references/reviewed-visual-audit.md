@@ -4,6 +4,8 @@
 
 本文件只适用于 `verification_profile=reviewed`，从规格到交付全程保持 `verification_profile=reviewed`。先完成共享基础阶段：构建，structure/background、内容完整性和主要内容可编辑性硬门禁，首次 preview，一次初始整页语义判断，以及最多一次基础集中修复和其新哈希 preview。reviewed 在此阶段不执行 rapid 专属终局语义复核，也不写 rapid 终态；硬门禁均通过后，才进入 reviewed 专属尾链。
 
+每次首次或修复后重新进入 prebuild 前，页面规格必须显式写 `delivery_status=pending`；验证器不补默认值。进入终局状态时只写 reviewed 终态：`reviewed_passed` 或 `reviewed_failed`。
+
 当前 PPTX 哈希已有成功 preview 时直接复用；尚未尝试时最多生成一次。当前哈希已因 command error、`SIGABRT`、无 PDF/preview 或 Poppler 缺失而失败时不重试、不 preflight、不换字体、不重建，写 `reviewed_failed` 并交付合格草稿。字体 fallback 本身不构成 P0/P1，只有可见裁切、错误换行、溢出或层级差异才评级。
 
 ## 整页视觉审查

@@ -2057,6 +2057,7 @@
         "canvas",
         "clean_visual_reference",
         "content_reference",
+        "delivery_status",
         "editability_gate",
         "elements",
         "modules",
@@ -3261,5 +3262,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "488da828031325b69505a2adc2566180e5f20f80f43afe1ce9655308d6e1c5f5"
+  "x-schema-contract-sha256": "da5a531de1de768f54ee407032eed3da9d391628b19c8308ceb526329f82f260"
 }
