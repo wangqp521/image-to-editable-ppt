@@ -45,6 +45,8 @@ spans = [{"start": start, "end": start + 1, "color": ORANGE}]
 
 `text_box.vertical_alignment` 必须服从来源的 `top|middle|bottom`，不得统一设为 `middle`。来源居中时写 `middle` 并保留实测上下 margins；来源上下留白对称时 margins 也对称。统一 renderer 已固定 `MSO_AUTO_SIZE.NONE`，规格不得新增 `autoFit/auto_size` 字段，也不得通过收缩框高、移动 y、插入空行或缩小字号伪造居中。
 
+页面文字辅助函数必须把 `vertical`/`valign` 声明为必填 keyword-only 参数，不得为 `top|middle|bottom` 设置默认值；每个调用点必须根据来源显式传入垂直对齐。该规则只防止遗漏选择，不改变来源本来就是顶部或底部对齐的 TextBox。
+
 ## Text Run 与原生列表
 
 字体、字号、字重、颜色、斜体、下划线、删除线、上下标和局部字号变化精确到 Text Run；标题、标签和强调范围不得退化为整框样式，Paragraph 与 Run 不互相替代。

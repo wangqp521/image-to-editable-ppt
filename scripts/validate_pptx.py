@@ -732,8 +732,11 @@ def _alignment(value: str | None) -> str | None:
     }.get(value, value)
 
 
-def _vertical_alignment(value: str | None) -> str | None:
-    return {"t": "top", "ctr": "middle", "b": "bottom"}.get(value, value)
+def _vertical_alignment(value: str | None) -> str:
+    return {None: "top", "t": "top", "ctr": "middle", "b": "bottom"}.get(
+        value,
+        value,
+    )
 
 
 def _text_object(
@@ -3108,6 +3111,24 @@ def _validate_text_run_contracts(
         actual_object = available[0]
         used_objects.add((actual_object.get("slide_part"), actual_object.get("object_id")))
         result["text_run_contracts_checked"] += 1
+        expected_text_box = item.get("text_box")
+        actual_text_box = actual_object.get("text_box")
+        expected_vertical = (
+            expected_text_box.get("vertical_alignment")
+            if isinstance(expected_text_box, dict)
+            else None
+        )
+        actual_vertical = (
+            actual_text_box.get("vertical_alignment")
+            if isinstance(actual_text_box, dict)
+            else None
+        )
+        if expected_vertical != actual_vertical:
+            result["errors"].append("TEXT_BOX_VERTICAL_ALIGNMENT_MISMATCH")
+            result["warnings"].append(
+                f"{element_id}: vertical alignment expected {expected_vertical!r}, "
+                f"got {actual_vertical!r}"
+            )
         text = item.get("text")
         if not isinstance(text, str):
             continue
