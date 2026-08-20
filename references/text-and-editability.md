@@ -28,6 +28,28 @@ spans = [{"start": start, "end": start + 1, "color": ORANGE}]
 
 不得手工展开完整 `runs[]`，不得使用正则或“所有数字”等内容类别批量推断样式，也不得通过拆框或硬换行规避 Text Run、Paragraph 或排版问题。
 
+## 固定文本框的字形安全区
+
+普通视图中部分文字被裁切、仅在鼠标悬停或双击编辑态显示完整时，文字内容和 Text Run 仍然存在；按固定 TextBox 容量不足处理，不拆框、不补字、不图片化。首次构建前必须预防可判断的裁切：以框内最大 Text Run 字号为 `1em`；来源可见字形到任一水平可用边界小于 `0.5em` 时判为高风险，优先检查 `wrap=false` 的多 Text Run、粗体和长单行文字。不得把无可见边框的 TextBox 收紧到字形边界。
+
+### 首次最小安全扩框
+
+只处理无填充、无边框、`wrap=false` 且左右均有已确认空白的高风险 TextBox。首次固定使用 `p=0.5em`：`p_pt=max_run_font_size_pt×0.5`、`p_source_px=p_pt/scale_pt_per_source_px`、`p_emu=p_pt×12700`；复用页面既有 mapping，不使用固定 DPI，不运行测字、碰撞搜索或额外 preview。设来源 TextBox 为 `x,w`，先在 source 坐标执行 `x'=x-p_source_px`、`w'=w+2p_source_px`，再由既有 mapping 生成 element `slide_bbox`；typography 边距 `ml,mr` 使用 EMU，并按 alignment 保持视觉锚点：
+
+| alignment | `margin_left'` | `margin_right'` | 保持不变的锚点 |
+|---|---:|---:|---|
+| `left` | `ml+p_emu` | `mr` | slide `x'+margin_left'=x+ml` |
+| `center` | `ml` | `mr` | 可用文本区中心不变 |
+| `right` | `ml` | `mr+p_emu` | slide `x'+w'-margin_right'=x+w-mr` |
+
+左对齐不得同时增加 `margin_right`，右对齐不得同时增加 `margin_left`；对所有 alignment 同时补偿左右 margin 会把新增可用宽度抵消，只得到更大的外框，不能解决末字裁切。element `source_bbox` 必须写扩展后的 source 框，`kind=text` element 的 `slide_bbox` 必须由该框按 canvas mapping 生成并与 typography `text_box` 完全同步；原始字形/来源测量框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID`。扩框只进入已确认空白，不改 y/h、字号、字体、字距、Paragraph、Text Run、换行或垂直对齐。
+
+页面边界、表格单元格、矩阵格子、卡片标签及其他受限容器不能提供完整 `0.5em` 空白时，不盲目执行上述首次扩框，也不得越过来源容器。首次 preview 只在普通视图验证残余首尾裁切、错误换行和扩框重叠；悬停或双击后显示完整不能算通过。若仍有裁切，把全部文字问题合入唯一一次集中修复：外侧仍有空白时沿用同一锚点公式把目标框安全区提高到最多 `1.0em`；受限容器内先调整 box 与 margin，来源本来允许自动换行时才调整 wrap。
+
+缩小字号不是裁切的默认修复。只有固定框受硬边界约束、box/margin/wrap 均不能在不破坏来源布局的前提下容纳文字，并且生成字形确实比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组；不得逐框“减 1pt”试排。若字号与来源一致而只是首尾裁切，继续修 box/margin，不以缩字掩盖容量不足。
+
+统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。只有固定框无法在不破坏来源布局的前提下容纳文字、且用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit；这不属于当前页面的 preview 后补丁。
+
 ## 行距、段距与框内垂直位置
 
 先按来源语义确定 Paragraph，再调框内排版。一个 Paragraph 自动折成多行时保持连续 text、`wrap=true` 且不写 `soft_breaks`，只用该段 `line_spacing` 控制行距；两个独立段落必须是两个 `paragraphs[]`，段间距只由相邻一侧的 `space_after` 或 `space_before` 承担，另一侧为 0，禁止用空段、硬回车或扩大段内行距模拟段距。
@@ -79,7 +101,7 @@ scale_pt_per_source_px =
 
 不做字体比较、候选字体试排或阶段性换字。特殊字符、生僻字、公式、多语言或缺字只能触发局部内容调查，不能在渲染后修改 `preferred_font`。
 
-调整顺序：字号 → box → margin/wrap → 字距 → 行/段距 → 垂直对齐；先锁定换行位置，再校准相邻行中心距，最后校准文字块纵向中心。自动折行只改 `line_spacing`，真实段落优先改相邻一侧的 `space_after/space_before`。不用硬换行、拆框、过度缩字、改写或图片化掩盖问题。若生成了预览，把 source/preview 中全部可见文字问题合入一次修复批次；修正后重跑 build、structure、background，并至多再生成一次预览。字体 fallback 只披露，不修复。`validate_pptx.py --spec` 继续核对 OOXML Text Run 字号与规格 point 值。
+调整顺序由根因决定：同一语义组的生成字形系统性大于来源时先校准字号；字号与来源一致而首尾裁切时按 box → margin/wrap 处理；受限容器没有扩框空间时，字号才是最后兜底。随后才调整字距 → 行/段距 → 垂直对齐；先锁定换行位置，再校准相邻行中心距，最后校准文字块纵向中心。自动折行只改 `line_spacing`，真实段落优先改相邻一侧的 `space_after/space_before`。不用硬换行、拆框、过度缩字、改写或图片化掩盖问题。若生成了预览，把 source/preview 中全部可见文字问题合入一次修复批次；修正后重跑 build、structure、background，并至多再生成一次预览。字体 fallback 只披露，不修复。`validate_pptx.py --spec` 继续核对 OOXML Text Run 字号与规格 point 值。
 
 ## 特殊文本与最低可编辑性
 

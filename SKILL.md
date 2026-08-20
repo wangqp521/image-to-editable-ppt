@@ -34,6 +34,8 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
 
+首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字；对无填充、无边框且周围有已确认空白的文本框，首次按文字对齐锚点预留 `0.5em` 安全区，不改字号、换行或视觉锚点。preview 只验证残余裁切，不是计划中的统一扩框或缩字号阶段；不得全局启用 AutoFit。精确公式、受限容器与字号兜底规则见[文字与可编辑性](references/text-and-editability.md)。
+
 简单 2D `pie|doughnut|column|bar|line` 在分类、系列、数值、轴、图例与标签均可确认时使用原生 Chart。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足时保留当页最小局部 picture。
 
 按页面内容读取条件 reference：
@@ -64,9 +66,9 @@ python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans
 
 macOS 必须从第一次就把 LibreOffice 放在允许启动应用的执行环境中运行；脚本使用独立可写 profile 和进程锁。`rapid` 直接预览只尝试一次：command error、`SIGABRT`、无 PDF 或 Poppler 缺失时记录为 preview 不可用，不重试、不运行 visual diff，继续交付已通过 structure/background 的 PPTX。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 仅记录诊断，不能否定该 preview。
 
-当前哈希 preview 可用时，主代理执行且只执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、换行、框内垂直位置、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 或 preview 不可用时写 `rapid_validation_failed`。
+当前哈希 preview 可用时，主代理执行且只执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、首尾裁切、换行、固定文本框安全区、扩框后重叠、框内垂直位置、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 或 preview 不可用时写 `rapid_validation_failed`。
 
-全部 P0/P1 可修复时，最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。新 preview 可用时，主代理再执行一次修复后终局语义复核，只检查已知问题是否关闭及是否新增 P0/P1。该复核不得触发第二次修复、再次渲染或 reviewed Final；无开放 P0/P1 时写 `rapid_validated`，仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。
+全部 P0/P1 可修复时，最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；文字裁切优先继续调整固定 box 与 margin/wrap，不得在构建完成后直接修改 PPTX 或把 AutoFit 作为页面级补丁。从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。新 preview 可用时，主代理再执行一次修复后终局语义复核，只检查已知问题是否关闭及是否新增 P0/P1。该复核不得触发第二次修复、再次渲染或 reviewed Final；无开放 P0/P1 时写 `rapid_validated`，仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。
 
 ## reviewed 共享基础阶段 + 专属尾链
 
