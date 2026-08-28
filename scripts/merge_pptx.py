@@ -20,9 +20,11 @@ from xml.etree import ElementTree as ET
 from lib.font_runtime import font_runtime_identity, validate_font_runtime
 from lib.artifact_identity import snapshot_file
 from lib.final_identity import collect_current_artifacts
+from lib.hashing import canonical_json_sha256
 from lib.schema_contracts import unknown_field_detail
 from lib.spec_identity import content_spec_sha256
 from lib.visual_review_contracts import visual_review_record_issues
+from validate_reconstruction_spec import validate_spec
 
 
 NS = {
@@ -112,6 +114,23 @@ def _load_final_report(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise MergeError(
             "FINAL_REPORT_INVALID", f"Final report root must be an object: {resolved}"
+        )
+    return payload
+
+
+def _load_draft_report(path: Path) -> dict[str, Any]:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file() or resolved.is_symlink():
+        raise MergeError("DRAFT_REPORT_NOT_FOUND", f"Draft report does not exist: {resolved}")
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise MergeError(
+            "DRAFT_REPORT_INVALID", f"Draft report is not valid JSON: {resolved}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise MergeError(
+            "DRAFT_REPORT_INVALID", f"Draft report root must be an object: {resolved}"
         )
     return payload
 
@@ -262,6 +281,7 @@ def _validate_reviewed_page_binding(
         or final_report.get("verification_profile") != "reviewed"
         or final_report.get("delivery_status") != delivery_status
         or final_report.get("content_spec_sha256") != content_spec_sha256(spec)
+        or final_report.get("spec_sha256") != canonical_json_sha256(spec)
     ):
         raise MergeError(
             "FINAL_REPORT_INVALID",
@@ -325,6 +345,13 @@ def _validate_reviewed_page_binding(
             page_id=page_id,
             errors=review_issues,
         )
+    current_final = validate_spec(spec, stage="final")
+    if current_final.get("valid") is not True or current_final.get("errors") != []:
+        raise MergeError(
+            "FINAL_REPORT_INVALID",
+            f"Current page no longer passes final validation: {page_id}",
+            errors=current_final.get("errors", []),
+        )
     pptx_path, pptx_hash, pptx_raw = _artifact_identity(
         final_pptx,
         "INPUT_SPEC_HASH_MISMATCH",
@@ -348,6 +375,76 @@ def _validate_reviewed_page_binding(
             "repair_applied": review["repair_applied"],
             "post_repair_verification": review["post_repair_verification"],
         },
+    }
+
+
+def _validate_draft_page_binding(
+    input_path: Path,
+    spec: dict[str, Any],
+    draft_report: dict[str, Any],
+) -> dict[str, Any]:
+    current = validate_spec(spec, stage="draft")
+    if current.get("valid") is not True or current.get("errors") != []:
+        raise MergeError(
+            "DRAFT_REPORT_INVALID",
+            f"Current page does not pass all draft gates: {spec.get('page_id')}",
+            errors=current.get("errors", []),
+        )
+    required_equal = (
+        "page_id",
+        "verification_profile",
+        "delivery_status",
+        "spec_sha256",
+        "content_spec_sha256",
+        "current_pptx",
+        "structure_validation",
+        "background_contract",
+        "gates",
+    )
+    if (
+        draft_report.get("valid") is not True
+        or draft_report.get("errors") != []
+        or draft_report.get("stage") != "draft"
+        or any(draft_report.get(field) != current.get(field) for field in required_equal)
+    ):
+        raise MergeError(
+            "DRAFT_REPORT_INVALID",
+            f"Draft report is stale or incomplete: {spec.get('page_id')}",
+        )
+    current_pptx = current["current_pptx"]
+    input_hash = _file_sha256(input_path)
+    if (
+        current_pptx.get("path") != str(input_path.resolve())
+        or current_pptx.get("sha256") != input_hash
+    ):
+        raise MergeError(
+            "INPUT_SPEC_HASH_MISMATCH",
+            f"Draft report does not bind the current input PPTX: {spec.get('page_id')}",
+        )
+    pptx_path, pptx_hash, pptx_raw = _artifact_identity(
+        current_pptx,
+        "INPUT_SPEC_HASH_MISMATCH",
+    )
+    if pptx_path != input_path.resolve() or pptx_hash != input_hash:
+        raise MergeError(
+            "INPUT_SPEC_HASH_MISMATCH",
+            f"Draft PPTX snapshot is stale: {spec.get('page_id')}",
+        )
+    _, _, structure_raw = _artifact_identity(
+        current["structure_validation"],
+        "DRAFT_REPORT_INVALID",
+    )
+    try:
+        structure = json.loads(structure_raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise MergeError("DRAFT_REPORT_INVALID", "Structure report is not valid JSON") from exc
+    return {
+        "page_id": current["page_id"],
+        "verification_profile": current["verification_profile"],
+        "delivery_status": current["delivery_status"],
+        "profile_passed": True,
+        "validation": structure,
+        "pptx_raw": pptx_raw,
     }
 
 
@@ -648,35 +745,57 @@ def merge_presentations(
     output: Path,
     *,
     draft: bool = False,
+    draft_reports: list[Path] | None = None,
 ) -> dict[str, Any]:
     if not inputs:
         raise MergeError("INPUTS_REQUIRED", "At least one single-slide PPTX is required")
     paths = [Path(item).expanduser().resolve() for item in inputs]
     spec_paths: list[Path] = []
     final_report_paths: list[Path] = []
+    draft_report_paths: list[Path] = []
     page_bindings: list[dict[str, Any]] = []
     validations: list[dict[str, Any]] = []
+    draft_reports = [] if draft_reports is None else draft_reports
 
     if draft:
-        if specs or final_reports:
+        if final_reports or len(inputs) != len(specs) or len(inputs) != len(draft_reports):
             raise MergeError(
                 "DRAFT_MERGE_ARGUMENTS_INVALID",
-                "Draft merge accepts only --input values",
+                "Every draft input requires one spec and one draft report; final reports are forbidden",
             )
-        validator = _load_validator()
-        verification_profile = "rapid"
-        page_ids = [f"page-{index + 1:03d}" for index in range(len(paths))]
-        for path in paths:
+        spec_paths = [Path(item).expanduser().resolve() for item in specs]
+        draft_report_paths = [
+            Path(item).expanduser().resolve() for item in draft_reports
+        ]
+        page_specs = [_load_page_spec(path) for path in spec_paths]
+        page_draft_reports = [
+            _load_draft_report(path) for path in draft_report_paths
+        ]
+        verification_profiles = [
+            spec.get("verification_profile") for spec in page_specs
+        ]
+        if (
+            any(profile not in VERIFICATION_PROFILES for profile in verification_profiles)
+            or len(set(verification_profiles)) != 1
+        ):
+            raise MergeError(
+                "VERIFICATION_PROFILE_MISMATCH",
+                "All draft inputs must use one fixed rapid or reviewed profile",
+                profiles=verification_profiles,
+            )
+        verification_profile = verification_profiles[0]
+        page_ids = [spec.get("page_id") for spec in page_specs]
+        if (
+            any(not isinstance(page_id, str) or not page_id for page_id in page_ids)
+            or len(page_ids) != len(set(page_ids))
+        ):
+            raise MergeError("PAGE_ID_INVALID", "Draft page_id values must be non-empty and unique")
+        for path, page_spec, draft_report in zip(paths, page_specs, page_draft_reports):
             if not path.is_file():
                 raise MergeError("INPUT_NOT_FOUND", f"Merge input does not exist: {path}")
-            validation = validator.validate_pptx(path, expected_slides=1)
-            if not validation.get("valid"):
-                raise MergeError(
-                    "INPUT_VALIDATION_FAILED",
-                    f"Draft merge input did not pass structure validation: {path}",
-                    errors=validation.get("errors", []),
-                )
-            validations.append(validation)
+            binding = _validate_draft_page_binding(path, page_spec, draft_report)
+            page_bindings.append(binding)
+            validations.append(binding["validation"])
     else:
         if len(inputs) != len(specs):
             raise MergeError(
@@ -758,7 +877,7 @@ def merge_presentations(
 
     destination_entries = _read_package(
         paths[0],
-        None if draft else page_bindings[0]["pptx_raw"],
+        page_bindings[0]["pptx_raw"],
     )
     try:
         destination_content_types = ET.fromstring(destination_entries["[Content_Types].xml"])
@@ -769,7 +888,7 @@ def merge_presentations(
     for index, path in enumerate(paths[1:], start=1):
         source_entries = _read_package(
             path,
-            None if draft else page_bindings[index]["pptx_raw"],
+            page_bindings[index]["pptx_raw"],
         )
         imported_parts.append(
             _append_slide(destination_entries, source_entries, destination_content_types)
@@ -802,6 +921,7 @@ def merge_presentations(
         "inputs": [str(path) for path in paths],
         "specs": [str(path) for path in spec_paths],
         "final_reports": [str(path) for path in final_report_paths],
+        "draft_reports": [str(path) for path in draft_report_paths],
         "page_ids": page_ids,
         "verification_profile": verification_profile,
         "render_identity": None,
@@ -825,6 +945,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", action="append", required=True, type=Path)
     parser.add_argument("--spec", action="append", default=[], type=Path)
     parser.add_argument("--final-report", action="append", default=[], type=Path)
+    parser.add_argument("--draft-report", action="append", default=[], type=Path)
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
@@ -835,6 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             args.final_report,
             args.output,
             draft=args.draft,
+            draft_reports=args.draft_report,
         )
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False, indent=2))
         return 0

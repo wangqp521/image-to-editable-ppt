@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from typing import Any
 
@@ -92,38 +93,71 @@ def set_native_bullet(
     properties.append(element)
 
 
+def set_preset_shape_adjustments(shape: Any, values: list[float], path: str) -> None:
+    """Write every adjustment handle exposed by a preset PowerPoint shape."""
+    try:
+        adjustments = shape.adjustments
+    except AttributeError as exc:
+        raise ToolError("BUILD_OUTPUT_INCOMPLETE", path, "shape has no preset adjustments") from exc
+    if not isinstance(values, list) or len(values) != len(adjustments):
+        _invalid(
+            path,
+            f"preset shape requires exactly {len(adjustments)} adjustment values",
+            "shape.preset.adjustments",
+        )
+    for index, value in enumerate(values):
+        if (
+            type(value) not in {int, float}
+            or not math.isfinite(value)
+            or not -360 <= value <= 360
+        ):
+            _invalid(path, "preset adjustment values must be finite numbers", "shape.preset.adjustments")
+        try:
+            adjustments[index] = value
+        except (IndexError, TypeError, ValueError, OverflowError) as exc:
+            raise ToolError(
+                "BUILD_OUTPUT_INCOMPLETE",
+                path,
+                "preset shape adjustment could not be written",
+                "shape.preset.adjustments",
+            ) from exc
+
+
+def set_shape_flips(
+    shape: Any,
+    flip_horizontal: bool,
+    flip_vertical: bool,
+    path: str,
+) -> None:
+    """Write explicit DrawingML flip attributes without changing the shape bbox."""
+    if type(flip_horizontal) is not bool or type(flip_vertical) is not bool:
+        _invalid(path, "shape flip flags must be boolean", "shape.flip")
+    try:
+        transform = shape._element.spPr.xfrm
+    except AttributeError as exc:
+        raise ToolError("BUILD_OUTPUT_INCOMPLETE", path, "shape has no transform") from exc
+    for attribute, enabled in (("flipH", flip_horizontal), ("flipV", flip_vertical)):
+        if enabled:
+            transform.set(attribute, "1")
+        else:
+            transform.attrib.pop(attribute, None)
+
+
 def set_round_rect_adjustment(shape: Any, values: list[float], path: str) -> None:
-    """Write rounded-rectangle adjustment values through explicit DrawingML."""
+    """Backward-compatible wrapper for existing roundRect callers."""
     invalid_shape = (
         not isinstance(values, list)
         or len(values) != 1
         or type(values[0]) not in {int, float}
         or not 0 < values[0] <= 0.5
     )
-    quantized = (
-        None if invalid_shape else quantize_drawingml_percentage(values[0])
-    )
-    if (
-        invalid_shape
-        or quantized is None
-        or not 1 <= quantized <= DRAWINGML_PERCENT_SCALE // 2
-    ):
+    if invalid_shape:
         _invalid(
             path,
             "roundRect adjustment must quantize from 1 to 50000",
             "shape.roundRect.adjustment",
         )
-    try:
-        geometry = shape._element.spPr.prstGeom
-        adjustments = geometry.avLst
-    except AttributeError as exc:
-        raise ToolError("BUILD_OUTPUT_INCOMPLETE", path, "shape has no preset geometry") from exc
-    for child in list(adjustments):
-        adjustments.remove(child)
-    adjustment = OxmlElement("a:gd")
-    adjustment.set("name", "adj")
-    adjustment.set("fmla", f"val {quantized}")
-    adjustments.append(adjustment)
+    set_preset_shape_adjustments(shape, values, path)
 
 
 def set_line_arrowheads(line: Any, contract: dict[str, Any], path: str) -> None:

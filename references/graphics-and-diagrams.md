@@ -1,50 +1,83 @@
 # 图形与图示
 
-`modules.graphics/diagram/chart` 引用 v2 `element_id`，禁填 OOXML ID；存数/bbox/结构/样式/层级/可编辑性。
+本文件只负责原生几何、multipart 结构、连接线、表格、矩阵、状态组件和图表。picture/icon 不属于 native；它们由[图片与图标](pictures-and-icons.md)负责。
 
-当前 native：文字、rectangle/roundRect/ellipse/triangle/chevron/rightArrow、线、表格、matrix/status、picture/icon，以及满足封闭合同的简单 2D `pie|doughnut|column|bar|line`；multipart 用 `composite` parts/repeat，不建 IR。自由曲线、其他 preset 和超出首期合同的复杂图表不原生构建；`required_editability=full|labels_and_geometry` 禁 asset fallback，prebuild 失败即停。`parts/repeat_sequence` 默认禁重叠；仅源图确有重叠且各 part bbox/层级忠实时，父 element `content.allow_overlap=true`；禁为绕错改 bbox、并 parts、滥用开关。
+## 原生表示边界
 
-首轮构建时，块状、带面积填充的箭头优先使用 `rightArrow`；细连接关系才使用 line arrow marker。该选择只复用 compiler 已支持表示，不得为规避 renderer 差异改变来源语义、方向或几何。
+`render_mode` 的 native 能力是封闭集合：
 
-## 表格、矩阵与框线
+- `native_text`：普通/特殊文字与主要数字；
+- `native_shape`：单个受支持基础 preset；
+- `native_line`：直线或可由连接线合同忠实表达的连接；
+- `native_table`：规则表格及合并单元格；
+- `native_chart`：满足封闭数据合同的简单二维图表；
+- `composite_native`：真实由多个几何部件组成的流程结构、节点组、状态组件或重复布局。
 
-行列/合并明确用原生表格；不规则分区/边界/组/跨行用 Shape/Line/TextBox。表格不拆文本框，网格图示不强制表格化。
+先核对 `classification_basis/classification_evidence`，再判断 `visual_role`，最后判断 preset。角色—模式为封闭合同：`text→native_text`，`icon|pictogram|logo|photo|illustration|texture|ornament→picture_asset`，`container→native_shape|composite_native|picture_asset`，`connector→native_line|picture_asset`，`diagram_node→native_shape|composite_native|picture_asset`，`diagram_geometry→native_shape|native_line|composite_native|picture_asset`，`chart→native_chart|picture_asset`。结构角色只有在 native 无法忠实表达时才使用不含主要文字的最小 `picture_asset`，并保持可分离标签原生可编辑。`data` 只允许对应的文字、表格、图表或组合数据结构模式；前景 `background` 不得进入 representation plan。
 
-存行列数、非均匀尺寸、merge span、cell fill/margin/align、四边及线起止/颜色/宽度/透明度/虚实；禁补网格/无线区、延长局部线。合并区、组内外线/填充逐范围存；线不穿合并区，换行不生线。
+只有 `container|diagram_node|diagram_geometry` 等结构角色，且完整可见轮廓高置信匹配单个 PowerPoint preset 时，才使用 `native_shape`。`diagram_node/native_shape` 还必须回指真实 connector 或节点内标签，不得仅凭相邻文字、图标槽位或 `can|cube|flowChart*` 轮廓通过。`icon|pictogram|logo` 必须走 `picture_asset`；需要多个基础 preset 才能表达业务语义的独立符号也不是 `composite_native`。
 
-闭合虚框为对象，存 bbox、线宽、颜色、虚线、层级，不按短线计数或漏边。
+`required_editability=full|labels_and_geometry` 禁止 asset fallback；没有忠实原生表示时 prebuild 失败关闭。`parts/repeat_sequence` 默认禁止重叠；只有来源确有重叠且各 part bbox/层级忠实时，父 element 才可写 `content.allow_overlap=true`。
 
-## 状态条、圆角、线和填充
+### 受支持基础 preset
 
-底轨同高可见才用 `track_plus_fill`；仅细线续接用 `fill_plus_continuation_line` 且 `track_bbox=null`。每例存三类 bbox、中心线、端点、比例、层级；续线始于 fill 右端。禁伪底轨、统一长度、掩差、跨/并行；长中短均核对。
+- 矩形：`rectangle|roundRect|round1Rect|round2SameRect|round2DiagRect|snip1Rect|snip2SameRect|snip2DiagRect|snipRoundRect`。
+- 基本形状：`ellipse|triangle|rtTriangle|parallelogram|trapezoid|nonIsoscelesTrapezoid|diamond|pentagon|hexagon|heptagon|octagon|decagon|dodecagon|plus|frame|halfFrame|corner|diagStripe|teardrop|chord|pie|pieWedge|donut|arc|blockArc|bracePair|bracketPair|leftBrace|rightBrace|leftBracket|rightBracket|can|cube|bevel|foldedCorner|plaque|noSmoking|smileyFace|heart|lightningBolt|sun|moon|cloud`。
+- 简单块箭头：`rightArrow|leftArrow|upArrow|downArrow|leftRightArrow|upDownArrow|quadArrow|chevron|homePlate|notchedRightArrow|stripedRightArrow`。
+- 公式、标准流程图、规则星形及简单面状标注仅限 schema 的 `BASIC_NATIVE_SHAPE_TYPES`。
 
-v1 shape/line 合同（字段齐全、不扩展）：
+`rectangle` 是兼容别名，最终 OOXML 为 `rect`。`style.adjustments` 一旦声明，必须写齐该 preset 的全部黄色调节点；`flip_horizontal/flip_vertical` 必须显式布尔值。形状类型、adjustments、flip、rotation、fill、line 和 effects 按来源一次写全，不依赖 renderer 默认值。
 
-- `shape.style.fill` 仅：`"noFill"`、`{"type":"solid","color":"#RRGGBB","opacity":0..1}`，或 `{"type":"linear_gradient","angle":0..<360,"stops":[{"position":0..1,"color":"#RRGGBB","opacity":0..1},...]}`；gradient 至少 2 stops，position 严增，仅用于连续定向变色。
-- shape/line `style.line`：`{"color":"#RRGGBB","width":12700,"dash":"solid","opacity":1}`；width 为 1..20116800 整数 EMU，dash 仅 `solid|dash|dot|dashDot`；另存起止/端点/层级，遮挡仍错误。
-- `shape.style.effects`：`"none"` 或 `{"outer_shadow":{"color":"#RRGGBB","opacity":0..1,"blur_radius":0,"distance":0,"angle":0..<360}}`；半径/距离为非负整数 EMU。`none` 对目标 Shape/Line：保留 `p:style`、令 `a:effectRef idx=0`，清除 `spPr` 下 `effectLst/effectDag` 后写空 `effectLst`；排除表格/图片/`graphicFrame`。
-- 矩形用 `rectangle`；圆角/胶囊用 `roundRect`，`style.adjustments` 为 `(0,0.5]` 单值数组，按 preview 校准；禁依赖默认值或顺带改 bbox/填充/文字。
+### Shape/Line 样式与 OOXML 安全
 
-## 图示、Connector 与重复组件
+- `shape.style.fill` 只使用 `noFill`、显式 RGB/opacity 的 solid，或至少两个严格递增 stop 的定向 linear gradient；来源无渐变时不得补渐变。
+- Shape/Line 的 `style.line` 显式写 `color/width/dash/opacity`；无描边必须是真正 no-line，不能用白线或透明近似。块状箭头匹配实际 preset，只有细连接关系使用 line arrow marker。
+- `shape.style.effects` 只使用 `none` 或来源可见且参数完整的 `outer_shadow`。`none` 必须保留 `p:style`、把 `a:effectRef` 设为 `idx=0`，清除 `spPr` 下旧 `effectLst/effectDag` 后写空 `effectLst`；该规则不作用于表格、图片和 `graphicFrame`。
+- 所有可见黄色调节点必须一次写全；不得依赖默认 adjustments、用 rotation 伪造 flip，或顺带改变 bbox、fill 和文字位置。
 
-存 nodes/ports/edges/groups/component_templates。edge：`source_node+port → route/bend_points → target_port+node`；端点附边界，路径/拐点/箭头/线型/Z-order 保真，多段端点重合，不悬空、入错节点、穿节点/标签或截断；不乱拆/合并关系。
+以下不属于基础 preset 路径：自由曲线；弧形、循环、弯折或多段箭头；箭头标注组合；wave/scroll/ribbon；schema 无法精确表达的渐变/纹理；复杂阴影、发光、3D；多层同心环或带业务图标语义的环。基础 Shape 的明确线性渐变可按来源使用原生 gradient fill；不得用相近 preset、bounding ellipse 或多个基础 Shape 近似复杂轮廓。
 
-重复卡片/KPI/步骤共享尺寸/padding/圆角/基线/间距，只留例外；不漂移/自动等距。Group 不包无关项；文字/connector 独立可编辑。
+复杂图形独立可分离时使用最小 `picture_asset`；与节点、连线或圆环粘连时，picture 只保留复杂轮廓及维持视觉连续所需的最短连接段。轮廓外可明确分离的标准节点、直线段和标签仍原生重建。若拆分会截断轮廓或形成重复边缘，则使用最小完整黏连子图，禁止在下方重复绘制同一节点或线。
+
+标签 bbox 可从资产排除时必须排除并原生重建；标签位于复杂轮廓内部且无法无损分离时，`required_editability=full|labels_and_geometry|labels_only` 均须 prebuild 失败。不得把原文字留在图片后再叠加一份可编辑文字。
+
+## 表格、矩阵与状态组件
+
+行列和合并明确时使用 `native_table`；不规则分区、边界、组或跨行关系使用 Shape/Line/TextBox。表格不拆成文本框，网格图示不强制表格化。
+
+表格记录行列、merge、row/column span、每格文字、paragraph/run、margin、对齐、填充、四边框、层级和元素身份。无边框必须是真正 no-line，不能用白线。每格文字只生成一次，避免重复段落或图层。
+
+矩阵和状态组件使用 `composite_native`，保存 `part_defaults/parts/repeat_sequence`。每个 part 显式写 `part_id/part_kind/source_bbox/slide_bbox/layer/style/content`；可见样式不得依赖默认值。
+
+状态条必须区分来源结构：底轨与填充同高且底轨真实可见时使用 `track_plus_fill`；只有填充后接细线时使用 `fill_plus_continuation_line` 且 `track_bbox=null`。逐例保存 track/fill/continuation 三类 bbox、中心线、端点、比例与层级；续线从 fill 右端开始。不得补造底轨、统一不同长度或让相邻条跨接。
+
+## 连接线与图示
+
+连接线记录精确端点、方向、宽度、颜色、dash、head/tail、层级及连接关系。不要把 `x/y/w/h` 当视觉中心；检查端点是否触达正确对象、是否穿越文字、箭头头型和方向是否一致。交叉仅在来源存在时保留。
+
+图示关系按 `source_node+port → route/bend_points → target_port+node` 保存。端点附着对象边界，多段线相邻端点必须重合；不得悬空、接错节点、穿过节点或标签、截断路径，也不得为简化 renderer 而拆分或合并来源关系。重复卡片、KPI 和步骤共享来源中的尺寸、padding、圆角、基线与间距，只记录真实例外；不自动等距，Group 不包入无关对象，文字和 connector 保持独立可编辑。
+
+图示先确定节点 bbox、层级和关系，再生成连接线，最后放置标签。主流程、回流、分支、反馈和闭环不能漏。标准节点/连接使用 native；复杂装饰进入最小 picture。图标槽位中的语义符号不因与流程相邻而变成节点。
 
 ## 图表
 
-简单 2D 图表只有在来源类型、分类、系列、数值、顺序、颜色和全部已启用样式均可确认，且不存在首期非目标能力时，才使用原生 ChartRenderer。Renderer 生成 `graphicFrame + chart part + embedded workbook`，不静默 fallback。`pie|doughnut` 仅单系列；`column|bar` 支持单系列或多系列 `clustered|stacked|percent_stacked`；`line` 支持多系列和 `null` 缺失值断口。
+`native_chart` 仅支持证据充分的二维 `pie|doughnut|column|bar|line`。来源类型、分类、系列、数值、顺序、颜色及所有启用样式都必须确认；renderer 必须生成 `graphicFrame`、chart part 与 embedded workbook，不能静默 fallback，也不能把图表烘焙为图片。
 
-分类、数值、颜色合并写入 `slices[]`；`value_source` 仅为 `explicit|derived_complement`。`derived_complement` 只用于两块扇区、一个明确整体百分比的 `100-x` 补余数，不推断分类名、第三块数据或一般数值归一化。`first_slice_angle` 为 0–359；doughnut 的 `hole_size` 为 10–90；pie 不写孔径。两类图表共用一套数据标签合同；`position=center` 表示扇区中心，圆环中心 KPI 必须另建原生 TextBox。
+### 饼图与环形图
 
-笛卡尔图表 content 显式写 `chart_type/grouping/categories/series/axes/legend/data_labels/display_blanks_as`。每个系列的 `values[]` 与 `categories[]` 等长；柱条值必须为有限数字，折线值可为有限数字或 `null`，每系列至少一个非空点。`display_blanks_as` 固定为 `gap`，禁止补点、插值、跨缺口连线或平滑。系列 `name` 可为 `null`，颜色为系列级纯色；首期不做逐点异色。
+- `slices[]` 按视觉顺序逐块写 `category/value/color/value_source`；pie/doughnut 只有一个 series。
+- `derived_complement` 只用于两块扇区且来源明确整体为 100% 的 `100-x`，不得推断分类名、第三块数据或一般归一化。
+- `first_slice_angle`、doughnut 的 `hole_size`、逐块颜色和 `data_labels` 按来源显式写入；扇区顺序、起始角度、孔径、标签内容与位置都必须核对。
 
-柱条 style 显式写 `gap_width/overlap/chart_area/plot_area`：gap 为 0–500，overlap 为 -100–100，`stacked|percent_stacked` 必须 100。百分比堆积只改变显示，workbook 保留原值；显式百分比轴使用 0..1 与百分比格式。折线系列显式写线宽/虚实、marker 样式/大小/填充/边线和 `smooth=false`；marker 仅 `none|circle|square|diamond|triangle`。
+### 柱、条与折线
 
-`axes.category` 与 `axes.value` 始终按语义命名，即使 bar 的物理方向互换。保存轴显隐/位置/反向、标签位置、字体/线、value 轴 min/max/major unit/number format 及主网格线；未明确的 min/max/major unit 可为 `null`，其他必填样式不得借 Renderer 默认值猜测。图例保存显隐、top/bottom/left/right、overlay 和字体。笛卡尔数据标签不使用饼环的 `show_percentage`；柱条位置限 center/inside_base/inside_end/outside_end，折线限 above/below/center/left/right。
+- `categories[]` 和每个 `series.values[]` 等长；column/bar 不允许 null，line 的 null 保持真实断口，`display_blanks_as=gap`，`smooth=false`。
+- column/bar 只允许 `clustered|stacked|percent_stacked`；stacked 与 percent_stacked 的 `overlap=100`，并按来源写 `gap_width`。line 使用 `grouping=standard`，逐系列写线宽、dash、marker 和颜色。
+- `axes.category/value` 显式写方向、位置、可见性、逆序、标签位置、字体与轴线；数值轴再写 `minimum/maximum/major_unit/number_format/major_gridlines`。不得因图面模糊而补造轴范围或刻度。
+- `legend`、`data_labels`、`chart_area` 与 `plot_area` 只在来源启用时按合同写入。标签的 category/series/value/percentage 开关、位置、格式、字号、字重和颜色不能依赖 PowerPoint 默认值。
 
-3D、组合图、双轴/次轴、散点/面积/瀑布、趋势线、误差线、渐变/纹理系列、任意逐点格式、平滑曲线、复杂阴影或证据不足时，继续使用当前最小局部 picture 路径；标题、单位、中心 KPI 和外围注释仍可独立使用 TextBox/Shape。不得在原生 Renderer 内改走图片，也不得造数据、分类、系列、轴或趋势。
+### 图表裁切与 fallback
 
-图存 type/三类 bbox/表示法/分类与系列序/确认点/轴/刻度/gridline/legend/label/颜色/线型/fill/marker/裁剪。结构验证核对原生 plot 类型、数据 cache、系列顺序与样式、缺失点、轴 ID/交叉关系、刻度、gridline、legend、labels、gap/overlap、角度/孔径和 embedded workbook。折线有序，无断口/突刺/串线，marker 居中；缺失值按源断开，不平滑/越界/改极值。柱条查方向/基线/gap/overlap/分组或堆积；饼环查序/角度/内径。
+native chart 没有 crop 字段，也不支持 `a:srcRect`；它的 `slide_bbox` 就是完整图表框，禁止通过扩大图表再遮罩或伪造裁切。若来源图表本身只显示局部、需要裁切，或属于 3D、组合/双轴、散点/面积/瀑布、趋势线、误差线、渐变/纹理系列、逐点复杂格式、平滑曲线、复杂阴影等超出合同的类型，则使用最小 `picture_asset`。picture fallback 通过 `content.mode/crop` 进入通用图片 renderer，并在 OOXML 写入 `a:srcRect`；标题、单位、中心 KPI、图例说明和外围注释中可分离的文字仍独立原生可编辑。
 
-对象数、merge/边界、状态条、connector 连续性、图表映射/裁剪错误不以“整体相似”放行。
+构建后必须核对 chart part、embedded workbook、plot 类型、系列/分类 cache、系列顺序、轴 ID 与交叉关系、刻度、gridline、图例/标签开关、颜色、gap/overlap、角度/孔径和缺失值断口。折线不得跨断口、平滑、越界或改极值；柱条核对方向、基线、gap/overlap 及分组/堆积；饼环核对扇区顺序、起始角度和内径。picture fallback 则核对素材哈希、像素尺寸、`a:srcRect`、bbox、rotation、opacity 与层级。两条路径都不得造数据、分类、系列、轴或趋势。

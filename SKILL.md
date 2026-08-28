@@ -5,40 +5,37 @@ description: Use when converting one or more uploaded images, screenshots, expor
 
 # Image to Editable PPT
 
-## 核心原则
+## 目标与不可破坏的原则
 
-把输入图片高保真复刻为可编辑 16:9 PPTX。事实正确优先于视觉高保真，视觉高保真优先于主要内容可编辑；禁止美化、自动平均、补造内容和整页图片化。普通文字、基础图形、表格、连接线与图表应原生可编辑；照片、Logo、图标、插画、纹理、艺术字和复杂装饰只保留为当页最小局部 picture。
+把每张来源图片高保真还原为 16:9 可编辑 PPTX。事实正确优先于视觉相似，视觉相似优先于次要素材可编辑；禁止美化、自动平均、补造看不清的内容和整页图片化。普通文字、数据、容器、基础图形、线、表格及证据充分的简单图表应原生可编辑；照片、Logo、图标、pictogram、插画、纹理和复杂装饰只保留为当页最小局部 picture。
 
-默认采用草稿优先的 `rapid`：先生成并完成与当前 PPTX 哈希绑定的 structure、background 验证，LibreOffice 只做一次可选、非阻断预览。字体回退、LibreOffice `SIGABRT`、缺少 Poppler 或预览失败都不得阻止交付已通过两项验证的可编辑草稿。
+每次任务从来源重新构建，不复用历史规格、PPTX、裁切资产、预览或验证报告。`schema v2` 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口；页面脚本只能生成完整规格，不能直接修改已生成 PPTX。
 
-schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口。精简流程不得削弱 Text Run、Paragraph、原生 bullet、表格 merge、connector、crop、background 与 OOXML 安全规则。
+任何流程精简、profile 优化或性能改造都不得削弱已经支持的高保真合同：单一复合 TextBox 与连续 Text Run、多个 Paragraph、原生 `buChar|buAutoNum|buBlip`、表格 merge、connector、picture crop、五类 native chart、背景合同及 OOXML 安全写入。若新流程与这些能力冲突，保留能力并修改流程；不得用拆框、图片化、静默 fallback 或放宽验证来换取速度。
 
-## 验证模式
+先用 `classification_basis/classification_evidence` 记录可核对的角色依据，再判断 `visual_role`，最后选择 `render_mode`。PowerPoint preset 清单只是 `native_shape` 能力白名单，不是对象分类器。文字旁、图标槽位或统一 pictogram family 中的业务符号必须是 `visual_role=icon|pictogram|logo` 与 `render_mode=picture_asset`；即使轮廓近似 `can|cube|arc` 也不能原生重画，同族不得混用。`diagram_node/native_shape` 必须同时具有结构边界、连接端点或内含标签事实，以及完整轮廓匹配；单纯“像某个 preset”不足以证明它是节点。
 
-`verification_profile` 和 `delivery_status` 必须显式写入每页规格。`verification_profile` 在一个批次内固定；每次首次或修复后重新进入 prebuild 前，页面专用 `prepare_spec.py` 必须写 `delivery_status=pending`。不得依赖验证器补默认值。prebuild 冻结后只由页面专用 `finalize_spec.py` 把状态改为当前 profile 的终态：rapid 使用 `rapid_validated|rapid_validation_failed`，reviewed 使用 `reviewed_passed|reviewed_failed`。
+复杂视觉与主要文字无法从来源像素无损分离时，必须按 `required_editability` 失败关闭，不得烘焙文字或重复叠字。详细边界见[图片与图标](references/pictures-and-icons.md)和[图形与图示](references/graphics-and-diagrams.md)。
 
-- `rapid`：默认模式。读取[rapid 交付](references/rapid-delivery.md)；无需 batch runtime preflight。完成构建、structure/background 与内容硬门禁后，当前哈希 preview 最多尝试一次；preview 可用时由主代理执行首次整页语义判断并一次列全 P0/P1，最多允许一次基础集中修复。修复后重建自动证据、为新哈希最多生成一次 preview，再执行一次修复后终局语义复核；该复核只作终局判定，不得触发第二次修复。
-- `reviewed`：用户明确要求额外视觉审查时使用。从任务开始到结束都写 `verification_profile=reviewed`；两种模式共享构建、硬门禁、首次 preview、首次语义判断、最多一次基础集中修复及其新哈希 preview。随后读取[reviewed 视觉审查](references/reviewed-visual-audit.md)；首次七类 coverage 审查同时吸收基础修复后的终局复核，不额外增加判断轮次，并保留最多一次 reviewed 专属额外集中修复及一次修复后视觉验证。
+## 工作流
 
-`rapid` 中，structure、background、内容完整性或主要内容可编辑性失败才阻断草稿交付与 `--draft` 合并。预览不可用时写 `rapid_validation_failed` 并交付已通过前两项验证的草稿；若 preview 已成功生成，字体回退只作诊断。不得把草稿称为视觉审查通过版。
+1. 确认页序、输出名和 `verification_profile`。未指定时使用 `rapid`；同一批次 profile 固定。
+2. 读取[测量与布局](references/measurement-and-layout.md)，展示 source 与 coordinate overlay，一次盘点全部事实、关系、图标族和高风险区域。
+3. 按页面内容读取条件 reference，生成页面专用 `prepare_spec.py` 与 `work/page-reconstruction.json`。首次及每次修复后进入 prebuild 前，规格必须显式写 `delivery_status=pending`。
+4. 对每个来源事实写 `modules.representation_plan.items[]`：`source_fact_id/visual_role/classification_basis/classification_evidence/source_bbox/required/render_mode/required_editability/fallback_policy/bound_element_ids/reason/coverage_status/evidence`。分类证据只引用同一 representation plan 中的事实和已有 icon family，不建立第二套 inventory；先定表示法，再写 element。
+5. 生成所需的当页局部资产；所有图标统一使用 `extract_icon_asset.py`，禁止页面专用裁切脚本。
+6. 运行共享构建链，得到绑定当前哈希的 structure、background、内容完整性与主要内容可编辑性证据。
+7. 按 profile 只读取一个尾链：默认[rapid 交付](references/rapid-delivery.md)；用户明确要求额外视觉审查时读取[reviewed 视觉审查](references/reviewed-visual-audit.md)。
 
-## preferred font
-
-字体是构建配置，不是独立流程。每页第一项 `modules.typography.items[].selected_font` 是该页 `preferred_font`；同页的 `selected_font`、`internal_font_declaration`、非空且非 `follow_text` 的 `bullet_font`、`font_name` 与 `font.name` 必须保持一致。compiler 把该字体写入文本、表格和图表的 `a:latin/a:ea/a:cs/a:sym`。
-
-`preferred_font` 不要求预先证明字体已安装，也不要求 LibreOffice 精确解析。`pdffonts` 的实际字体只写入诊断报告；不替换规格字体、不重建 PPTX、不触发第二次渲染。用户未指定字体时，按当前平台选一个稳定的中文无衬线字体并在整页保持一致。
+`rapid` 的 preview 不属于四项草稿门禁，但 `rapid_validated` 必须绑定当前 PPTX SHA-256 目录下的成功 preview，完成一次整页语义判断，并且没有开放 P0/P1。主动跳过或 preview 不可用时写 `rapid_validation_failed`；四项草稿门禁仍全部通过时继续生成哈希绑定 draft report 并交付可编辑草稿，不得冒充视觉判断通过。
 
 ## 页面规格
 
-每页维护 `prepare_spec.py`、`work/page-reconstruction.json` 与当前 `work/page.pptx`。展示 source 与 coordinate overlay 后，一次盘点全部元素和关系，把明确的点与框合并为一次批量测量。页面专用 Python 可使用局部函数、数组、推导式和循环生成完整 schema v2；不得创建第二套 IR 或直接修改生成的 JSON。
+每页维护 `prepare_spec.py`、`work/page-reconstruction.json`、`work/build-spec-snapshot.json` 与当前 `work/page.pptx`。视觉或结构修复必须修改 `prepare_spec.py` 并从 prebuild 重建；不得手改 JSON、PPTX 或旧报告。
 
-文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
+文字按来源 TextBox 一次转录为一个 `modules.typography.items[]`，使用 `text/runs/paragraphs/text_box`；多色或局部样式由无重叠、无缺口的 Text Run 表达。页面 `prepare_spec.py` 使用 `scripts/lib/textbox_authoring.py::compile_textbox()`：作者期 `paragraphs_text/spans` 只作为立即编译输入，返回值直接是一个 schema v2 element 和一个 typography item，不形成第二套 IR，也不写入 JSON。helper 的输入原子是完整来源 TextBox，必须同时保留全文 Text Run、一个或多个 Paragraph、逐段原生 list 和多行 `source_layout`；单行单段只是同一 helper 的特例。helper 以无默认值的 keyword-only 参数显式接收 `vertical_alignment` 与作者期 `text_safety=free_text|container_bound`；先锁定文字逻辑结构并在页面坐标中应用整个 TextBox 的几何安全处理，再由 helper 编译 schema 结构，`text_safety` 不写入 schema，也不改变对象数、Run、Paragraph 或 bullet。首次构建即按来源 mapping 处理字号、横向 `0.5em` 安全区、单行框纵向安全高度、margin、wrap、垂直锚点和框内垂直位置，不把可预防裁切推迟到 preview，也不全局启用 AutoFit、字体文件度量或自动字号搜索。详见[文字与可编辑性](references/text-and-editability.md)。
 
-首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字；对无填充、无边框且周围有已确认空白的文本框，首次按文字对齐锚点预留 `0.5em` 安全区，不改字号、换行或视觉锚点。preview 只验证残余裁切，不是计划中的统一扩框或缩字号阶段；不得全局启用 AutoFit。精确公式、受限容器与字号兜底规则见[文字与可编辑性](references/text-and-editability.md)。
-
-简单 2D `pie|doughnut|column|bar|line` 在分类、系列、数值、轴、图例与标签均可确认时使用原生 Chart。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足时保留当页最小局部 picture。
-
-按页面内容读取条件 reference：
+简单 2D `pie|doughnut|column|bar|line` 只有在分类、系列、数值、轴、图例和标签均可确认时使用 `native_chart`。native chart 没有 crop 合同，`slide_bbox` 就是完整图表框；需要裁切的复杂图表必须改用最小 `picture_asset`，通过 picture 的 `mode/crop` 写入 `a:srcRect`，同时保持独立标题、单位与标签可编辑。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足同样走该 fallback。
 
 | 页面条件 | 必读 reference |
 |---|---|
@@ -47,9 +44,9 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 | 表格、矩阵、状态条、图示、连接线或图表 | [图形与图示](references/graphics-and-diagrams.md) |
 | 图标、照片、Logo、截图、蒙版、背景或图片效果 | [图片与图标](references/pictures-and-icons.md) |
 
-## rapid 核心链
+## 共享构建链
 
-从 Skill 根目录执行。规格必须先写齐，再用一次 prebuild 同时验证并冻结 exact bytes；compiler 只读 snapshot。
+从 Skill 根目录执行。规格必须先写齐，prebuild 同时验证并冻结 exact bytes，compiler 只读 snapshot。`PPTX_SHA256` 必须替换为当前文件的实际 SHA-256。
 
 ```bash
 python3 scripts/validate_reconstruction_spec.py work/page-reconstruction.json --stage prebuild --snapshot work/build-spec-snapshot.json --output work/prebuild-validation.json
@@ -58,28 +55,10 @@ python3 scripts/validate_pptx.py work/page.pptx --expected-slides 1 --spec work/
 python3 scripts/validate_background_contract.py work/build-spec-snapshot.json --pptx work/page.pptx --build-report work/build-report.json --structure-report evidence/PPTX_SHA256/structure-validation.json --output evidence/PPTX_SHA256/background-contract.json
 ```
 
-structure 与 background 均为 valid 且各自绑定当前 PPTX 实际 SHA-256 后，PPTX 才满足草稿交付和 `--draft` 合并条件。代理调用 `--draft` 前必须确认这两份当前报告；draft merger 本身只重新运行每个输入的 PPTX structure validation，随后验证合并后的 deck，不接收或重验 background 报告。只有需要视觉预览时才运行一次；命令中的 `PPTX_SHA256` 必须替换为当前 PPTX 的实际 SHA-256，生成 preview 文件的直接父目录必须正是该 hash，禁止使用字面目录或复用旧 hash 目录：
+随后把当前 PPTX、structure report、background report、内容与可编辑性 review 的绝对路径和哈希写入当前规格的 `visual_gate/editability_gate`。所有可交付终态和所有合并都必须由 `--stage draft` 或 `--stage final` 生成的报告绑定当前完整规格与当前 PPTX；硬门禁失败终态不生成有效交付报告，旧哈希证据不可复用。
 
-```bash
-python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans GB" --output-dir preview/PPTX_SHA256
-```
+## 字体与交付
 
-macOS 必须从第一次就把 LibreOffice 放在允许启动应用的执行环境中运行；脚本使用独立可写 profile 和进程锁。`rapid` 直接预览只尝试一次：command error、`SIGABRT`、无 PDF 或 Poppler 缺失时记录为 preview 不可用，不重试、不运行 visual diff，继续交付已通过 structure/background 的 PPTX。若 preview 已成功生成，`pdffonts` mismatch、`matched=false` 或字体 fallback 仅记录诊断，不能否定该 preview。
+每页第一项 `modules.typography.items[].selected_font` 是 `preferred_font`。同页字体声明保持一致，并写入 `a:latin/a:ea/a:cs/a:sym`。字体是否安装、`pdffonts` mismatch 或 LibreOffice fallback 只作诊断，不改变构建字体，也不触发重新构建。
 
-当前哈希 preview 可用时，主代理执行且只执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、首尾裁切、换行、固定文本框安全区、扩框后重叠、框内垂直位置、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 或 preview 不可用时写 `rapid_validation_failed`。
-
-全部 P0/P1 可修复时，最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；文字裁切优先继续调整固定 box 与 margin/wrap，不得在构建完成后直接修改 PPTX 或把 AutoFit 作为页面级补丁。从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。新 preview 可用时，主代理再执行一次修复后终局语义复核，只检查已知问题是否关闭及是否新增 P0/P1。该复核不得触发第二次修复、再次渲染或 reviewed Final；无开放 P0/P1 时写 `rapid_validated`，仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。
-
-## reviewed 共享基础阶段 + 专属尾链
-
-只有 `verification_profile=reviewed` 才读取并执行[reviewed 视觉审查](references/reviewed-visual-audit.md)。两种模式共享构建、硬门禁、首次 preview、一次初始整页语义判断、最多一次基础集中修复及其新哈希 preview；reviewed 不执行 rapid 专属的终局复核与 rapid 终态。其首次七类 coverage 整页审查同时承担基础修复后的终局语义复核，不额外增加视觉判断轮次。审查发现的全部 P0/P1 可修复时，最多进行一次 reviewed 专属额外集中修复、按新哈希重建并执行一次修复后验证。rapid 不得读取或执行该 reference。
-
-## 多页与交付
-
-逐页执行。单页 prebuild/build/structure/background 失败时保留诊断并继续后页；代理仅在调用前确认 structure/background 均为 valid 且绑定当前 PPTX 哈希时，才可提交页面进入草稿合并，不要求 runtime、preview 或 final report：
-
-```bash
-python3 scripts/merge_pptx.py --draft --input page-001/work/page.pptx --input page-002/work/page.pptx --output final/deck-draft.pptx
-```
-
-草稿 merger 自身只重新检查每个输入为结构有效的单页 16:9 PPTX，并在合并后验证整份 deck；它不接收或重验 background/hash 报告。交付可编辑 PPTX、结构报告以及实际存在的预览/诊断；明确披露缺页、开放 P0/P1、字体回退与未验证项。不得因缺少 LibreOffice 证据隐藏或扣留已通过 structure/background 验证的草稿。
+逐页执行；失败页保留诊断并继续后页。多页合并必须按页序提供一一对应的 input、spec 及 draft/final report。交付 PPTX、验证摘要及实际存在的 preview/诊断，并披露缺页、开放问题、字体替代与未验证项。草稿不得称为 reviewed 视觉审查通过版。

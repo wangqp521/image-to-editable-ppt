@@ -1,52 +1,69 @@
 # 图片与图标
 
-素材只来自当前页 `clean_visual_reference` 或用户原始素材；不得联网、调用 imagegen 生成替代素材、借用其他页资产，或把外部标题/标签并入图片。照片、Logo、插画、纹理和复杂装饰可用独立局部 picture；主要文字、数字和数据仍保持可编辑。满页照片/纹理可作背景，但主要内容不能整页图片化。
+本文件负责来源资产、背景、图标角色与图标族、裁切和 picture 质量。素材只来自当前页 `clean_visual_reference` 或用户提供的当页原始素材；不得联网、调用 imagegen 生成替代素材、借用其他页资产，或把主要标题/标签并入图片。
 
-只有 representation plan 显式选择 `asset`、`fallback_policy=allow_minimal_asset` 且所需可编辑性为 `labels_only|none` 时，compiler 才接受最小局部 asset fallback；`labels_only` 还须绑定原生可编辑标签。资产必须为绝对、非 symlink 的本地 PNG/JPEG/WEBP，并绑定当前 SHA-256 与像素尺寸；来源 bbox 必须与 picture 完全一致，近整页 asset 永远拒绝。compiler 不自动生成、扩大或替换资产，也不把失败改成 asset 模式。
+## Picture 资产
 
-## 背景选择与后置门禁
+`render_mode=picture_asset` 必须绑定恰好一个 `kind=picture|icon` element 和绝对、非 symlink 的本地 PNG/JPEG/WEBP，记录 SHA-256 与像素尺寸；element 与 representation item 的 `source_bbox` 必须完全一致。compiler 不自动生成、扩大、替换资产，也不把失败静默改成图片模式。
 
-可用原生 shape/fill 精确表达、且绑定对象可在 OOXML 中唯一证明时选 `native`。只有已单独制作、不含任何前景语义的 `clean_background_asset` 才可选 `background_picture`；它必须绑定普通 picture，覆盖全页，`mode=none`、四边 crop 全零、opacity=1、rotation=0，不得直接使用含前景的原始整页参考图。`background_picture` 是背景合同专用模式，不加入普通 representation fallback 模式集。
+- icon、pictogram、Logo、照片、插画和纹理都必须来自来源像素，使用 `fallback_policy=required_source_asset`。
+- 其他复杂装饰可在 `required_editability=labels_only|none` 时使用 `allow_minimal_asset`；`labels_only` 还须绑定独立可编辑标签。
+- 近整页前景 asset 永远拒绝；主要文字、数字和数据必须独立原生。
 
-图标对上述选择的影响必须为零：图标数量、bbox、alpha、颜色或层级都不得改变 `native|background_picture` 决策；图标不得绑定为 background，图标裁块也不得充当 `clean_background_asset`。structure 通过后用 `validate_background_contract.py` 重算 build/OOXML 闭包，任何未声明的满页 picture、背景与前景污染或身份不一致都失败；不得手写 `valid=true`。
+## 背景
 
-## 图标
+背景仍使用独立 `modules.background.items[]` 合同，其 `selected_mode` 只允许 `native|background_picture`，不属于 representation plan 的 `render_mode`。只有不含任何前景语义的 `clean_background_asset` 才可用 `background_picture`；必须覆盖全页、`mode=none`、crop 全零、opacity=1、rotation=0。不得直接使用含前景的原始整页图。
 
-图标必须从当前页视觉参考裁切为各自独立 picture，放回原 bbox；简单或复杂图标都不得用 Shape、字符、重绘 SVG 或图标库替代。编号圆点、标签、文字、bullet 和分隔线不是图标，不得混入 `icon_only`。`extract_icon_asset.py` 是唯一图标资产生成入口，每次只处理一个已测量图标；不得编写页面专用裁切脚本，也不增加对象检测、批处理状态机或第二套资产规格。
+图标不得绑定为 background，图标裁块也不得充当 `clean_background_asset`。structure 通过后运行 `validate_background_contract.py` 重算 build/OOXML 闭包；未声明满页 picture、前景污染或身份不一致均失败。
 
-先在一次全页盘点中固定全部图标 bbox，再并发启动多个独立 extractor 进程。每个进程只读同一 visual，使用唯一 `icon_id`，写唯一 `assets/icons/<icon-id>.png`，且不共享临时文件或输出目录；并发只缩短等待，不改变单图标合同。只重跑失败或前景触边项，其他已通过资产不得重复提取。
+## 图标角色判定
 
-规格坐标统一为 `source_bbox=[x,y,w,h]`。bbox 必须包含完整轮廓、阴影和少量周边背景，大图标和小图标遵守同一规则；新任务固定 `padding=0`，不得在生成器里再次扩框。资产生成前查看带 bbox 的局部上下文，确认只包含目标图标且没有邻近文字、边框或分隔线。任何可见前景触边都视为坐标不足；前景触边时扩大 bbox 后重跑，不得在裁后补边或删除小连通部件。
+真正图标必须从当前页视觉参考裁切为各自独立 picture，并放回原 bbox。简单或复杂图标都不得用 Shape、字符、重绘 SVG、图标库或多个基础 preset 替代。preset 列表只说明 native 能表达什么，不决定对象是不是图标。
 
-图标裁切只允许 `alpha_isolation`，固定执行 `alpha_isolation`，不存在第二种裁切模式。`foreground_profile` 只解释前景，取值为默认 `standard` 或显式 `reverse-white-outline`：
+判定顺序：
 
-- `standard` 保持原行为，只把与裁切四边 4-connected 连通的同色背景写为透明。开放线框内部与外部连通的同色背景默认透明，封闭区域内未与外部连通的底色保持不透明。
-- 仅当局部上下文明确显示“彩色背景上的白色/近白色反白镂空线框图标”时，尤其是靶心、放大镜、盾牌等存在闭合孔洞的白色线框，显式使用 `reverse-white-outline`。该配置排除边框中的白色/近白色前景后学习彩色背景，保护白色/近白色像素，并把全裁块内匹配的同源背景写为透明，因此闭合线框内部的彩色底也会透明。
+1. 先划定图标槽位和 pictogram family，再检查单个轮廓。文字旁相同关系、列表/卡片中的重复对齐、相近 bbox/描边/颜色/视觉语言，以及只承担业务语义标识，均是图标上下文证据。对应分别优先写 `classification_basis=text_adjacent_symbol|repeated_icon_slot|standalone_semantic_symbol`。
+2. 业务符号一律写 `visual_role=icon|pictogram|logo`、`render_mode=picture_asset`、`fallback_policy=required_source_asset`。一旦进入同一 family，全部成员都走裁切，任何成员近似 `can|cube|ellipse|arc` 也不能脱离同组原生重画。
+3. 只有不处于图标上下文、承担容器、流程节点、边界、连接或图示几何职责，且完整轮廓高置信匹配单个受支持 preset 的对象，才进入 native 路径。真实流程节点写 `classification_basis=connector_endpoint_node`，并回指至少一个真实 connector 或节点内标签；`native_shape` 还必须 `structural_boundary=true` 与 `full_contour_match=true`。语义名称不能单独决定对象是图标，语义名称或 preset 相似度也不能单独决定它是节点；例如流程图中的真实数据库节点可使用 `can|flowChartMagneticDisk`。
+4. 一个独立符号需要两个以上基础 Shape/Line 才能表达完整业务语义时，默认是 pictogram，必须裁切；不得用 `foldedCorner + ellipse + line`、`ellipse + arc` 或多个 `cube` 拼图标。
+5. 编号圆点、标签、bullet、分隔线、容器和流程节点不是图标。角色或轮廓不确定时，独立且不含主要文字的业务符号优先使用最小 picture，不得为提高可编辑率而猜 native。
 
-`reverse-white-outline` 的 bbox 必须同时包含完整白色线框和少量可识别的彩色背景边距；白底、无彩色背景边距、白色前景触边或场景不明确时失败，不得猜测、扩大颜色范围或转用该配置。普通彩色/填充图标、白底图标、照片、Logo 和包含多色语义的图标保持 `standard`。图标本体、阴影、抗锯齿和所有小部件不做删除、重绘、改色或羽化。输出必须为同时含透明背景和可见前景的 RGBA PNG，前景不得触边，并保存 alpha channel hash。
+## 图标族 schema
 
-```bash
-python3 scripts/extract_icon_asset.py source.png \
-  --icon-id target \
-  --bbox-xywh X,Y,W,H \
-  --foreground-profile reverse-white-outline \
-  --output page/assets/icons/target.png
-```
+`modules.icons.families[]` 必须完整声明每个图标族：
 
-资产尺寸必须等于 bbox 尺寸，RGB 必须逐像素一致于来源裁块；只允许改变 alpha，包括最终透明像素下的 RGB 也不得改变。除 `reverse-white-outline` 上述受限的白色前景保护与同源彩色背景判定外，不得通用阈值抠图、美化、颜色分类过滤或按面积删除连通部件。提取脚本自动检查 RGBA、透明和可见像素、前景边界、RGB 一致性及 alpha hash；任一检查失败即修正 bbox 或输入后重跑，不切换处理模式。
+- `family_id`：唯一族 ID；
+- `expected_count`：来源中应有的成员数；
+- `member_fact_ids`：恰好列出全体 `source_fact_id`；
+- `required_render_mode=picture_asset`。
 
-`modules.icons` 绑定当前视觉图路径/哈希，逐 icon 保存唯一 `icon_id/element_id/category`、instance/repeat、semantic_scope、pixel/EMU bbox、layer、source path/hash、固定 `crop_mode=alpha_isolation`、padding/background handling、当前页 `assets/icons` 内非 symlink PNG 路径/hash、alpha hash、尺寸、sharpness、validation、`native_redraw=false`、`selectable_picture_verified` 和 `object_type=picture`。validator 直接校验已声明的 `assets/icons` 路径，不得从 clean visual 父目录推导；实际像素尺寸必须等于声明尺寸，PPTX 嵌入媒体 SHA-256 必须等于当前资产哈希。生成前不写 relationship/object ID；最终每图标必须可独立选择。
+每个 `modules.icons.icons[]` 必须写 `source_fact_id/family_id/slot_id`；同族 `slot_id` 唯一，icon 记录的事实集合、`expected_count` 和 `member_fact_ids` 必须完全相等。validator 交叉检查 representation plan：图标事实角色只能是 `icon|pictogram|logo`，并且全员 `picture_asset`。组内出现 native 或模式混用即 `SPEC_ICON_FAMILY_MODE_MISMATCH`，成员缺失即 `SPEC_ICON_FAMILY_INCOMPLETE`。
 
-当前页全部最终图标生成并通过自动校验后，运行 `create_icon_green_preview.py` 生成 `comparisons/icon-alpha-preview.png`。绿幕背景固定为 `#00FF00`，按 `icon_id` 展示最终 RGBA 资产。通过 commentary 标注 `[第 N/总页数] 图标透明效果展示（仅展示，不设审核门禁）`；每页最终资产集合只展示一次，无图标时不生成、不展示。展示不产生 passed/failed 结论，不等待用户或主代理确认，不作为 prebuild 或 final 证据；绿幕展示不写入 schema。展示后直接进入 prebuild。
+这套族合同是强制分类门禁：`classification_basis=repeated_icon_slot` 的 `repeat_group_id` 必须解析到该事实所属的唯一 family。不得只在 prose 中写“同组一致”，也不得让单个 preset 相似度覆盖 family 结论。轻量门禁负责角色—模式、事实引用、bbox 与绑定一致性；它不通过新 inventory 独立重做像素盘点。reviewed 的七类审查必须直接对照 source 核实歧义 preset 的关系证据。
 
-图标资产发生变化时，以新的最终资产集合重新展示一次；未变化时不得重复展示。绿幕预览只提供过程可观察性，不得据此引入另一种裁切模式、审核循环、manifest、缓存状态或额外门禁。图标放入 PPTX 后的位置、比例和整页视觉一致性统一由后续结构校验与整页视觉审计处理。
+## 图标提取
+
+`extract_icon_asset.py` 是唯一生成入口，每次只处理一个已测量图标。一次全页盘点固定全部 `source_bbox=[x,y,w,h]` 后，可并发运行多个独立进程；每个进程使用唯一 `icon_id` 与输出 `assets/icons/<icon-id>.png`，不得共享临时文件。只重跑失败或触边项。
+
+新任务固定 `padding=0`；bbox 本身必须包含完整轮廓、阴影和少量背景，生成器不得再次扩框。前景触边时只允许根据上下文修正 bbox 后再跑一次；第二次仍触边或确认与结构粘连时，停止图标提取，改为不含主要文字的最小局部 picture。
+
+裁切固定 `crop_mode=alpha_isolation`：
+
+- `foreground_profile=standard`：只把与裁切四边 4-connected 连通的同色背景写透明；
+- `reverse-white-outline`：仅用于彩色背景上的白色/近白色反白线框图标，并要求 bbox 同时包含完整线框和少量可识别彩色背景。
+
+白底、无彩色边距、白色前景触边或场景不明确时不得使用 `reverse-white-outline`。输出必须为 RGBA PNG，包含透明背景和可见前景，前景不触边；RGB 逐像素等于来源裁块，只允许 alpha 改变。不得重绘、改色、羽化、删除小部件或按面积过滤。
+
+`modules.icons` 绑定当前 visual 的路径/哈希；每个 icon 还必须记录资产路径/哈希、alpha hash、尺寸、layer、`crop_mode`、`padding=0`、`native_redraw=false`、`object_type=picture` 和可选择性状态。最终 PPTX 中嵌入媒体 SHA-256 必须等于当前资产哈希，每个图标可独立选择。
+
+全部最终图标通过自动校验后，只对最终资产集合运行一次 `create_icon_green_preview.py` 并展示 `comparisons/icon-alpha-preview.png`。绿幕图只用于过程可观察性，不是审核门禁，不写入 schema；资产变更后才重新生成。
 
 ## 非图标图片
 
-写入 `modules.picture_framing` 并绑定 element：素材路径/hash、source/slide bbox、原始/显示比例、`contain|cover|none`、四边 crop、焦点/偏移、mask、圆角、rotation、transparency、border/shadow/reflection/glow 和 picture fill 的 stretch/tile/alignment。
+`modules.picture_framing` 记录素材路径/hash、source/slide bbox、原始与显示比例、`contain|cover|none`、crop、焦点/偏移、mask、圆角、rotation、transparency、border/shadow/reflection/glow 和 picture fill。
 
-优先保持来源像素和宽高比；只有来源确为图片填充时才用 picture fill。`cover` 不得无证据居中，不得裁掉主体；crop 不得带入邻近文字、图标、边框或线；不扩图、不补被裁区域。圆形保持正圆；mask/alpha 抗锯齿连续，无白边、黑边、绿幕、色晕、断裂或不透明 halo。无平铺证据不得 tile，背景不得有接缝/漏底/重复。
+优先保持来源像素和宽高比；只有来源确为图片填充时才使用 picture fill。`cover` 必须有焦点/偏移证据，不能裁主体或带入邻近文字、图标、边框和线；无平铺证据不得 tile，背景不得出现接缝、漏底或无依据重复。圆形必须保持正圆，不扩图、不补造被裁区域。
 
-border/shadow/reflection/glow 只在来源可见时使用，分别记录方向、距离、blur、透明度、颜色、扩散和层级；不得套默认效果。以整页查构图、位置、焦点和层级，再以 200%–300% 查 crop/mask/alpha/圆角/边框/效果。误裁、拉伸、边缘断裂、拼接缝或效果方向错误不得通过。
+mask/alpha 抗锯齿必须连续，不得有白边、黑边、绿幕、色晕、断裂或不透明 halo。border/shadow/reflection/glow 只在来源可见时使用，分别记录方向、距离、blur、透明度、颜色、扩散和层级，不套默认效果，也不用不透明色块遮盖透明边缘。
 
-纯色必须写明确 RGB/alpha；无填充边框在最终 OOXML 中必须是真正 `noFill`。不得用不透明色块掩盖透明边缘问题，也不得为空刷新 hash 改动无关图片。
+先以整页核对构图、位置、焦点和层级，再以 200%–300% 局部检查 crop、mask、alpha、圆角、边框和效果。误裁、拉伸、边缘断裂、拼接缝、halo 或效果方向错误均为 P1，不得因“整体相似”放行。

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -10,30 +11,31 @@ from pptx.enum.dml import MSO_LINE_DASH_STYLE
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 from pptx.oxml.xmlchemy import OxmlElement
+from pptx.shapes.autoshape import AutoShapeType
 from pptx.util import Emu
 
 from lib.capabilities import ATOMIC_CAPABILITY_METADATA, CANONICAL_VALUES
 from lib.error_codes import ContractIssue, ToolError
+from lib.schema_contracts import SHAPE_PRESET_XML_VALUES
 from lib.geometry import (
     DRAWINGML_FULL_CIRCLE,
     DRAWINGML_LINE_WIDTH_MAX,
-    DRAWINGML_PERCENT_SCALE,
     quantize_drawingml_angle,
     quantize_drawingml_percentage,
 )
 
 from .common import RenderContext, register_renderer
-from .ooxml import neutralize_shape_effects, set_round_rect_adjustment
+from .ooxml import (
+    neutralize_shape_effects,
+    set_preset_shape_adjustments,
+    set_shape_flips,
+)
 
 
 _RGB = re.compile(r"#[0-9A-Fa-f]{6}")
 _SHAPE_TYPES = {
-    "rectangle": MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-    "roundRect": MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-    "ellipse": MSO_AUTO_SHAPE_TYPE.OVAL,
-    "triangle": MSO_AUTO_SHAPE_TYPE.ISOSCELES_TRIANGLE,
-    "chevron": MSO_AUTO_SHAPE_TYPE.CHEVRON,
-    "rightArrow": MSO_AUTO_SHAPE_TYPE.RIGHT_ARROW,
+    shape_type: MSO_AUTO_SHAPE_TYPE.from_xml(preset)
+    for shape_type, preset in SHAPE_PRESET_XML_VALUES.items()
 }
 _DASH_STYLES = {
     "solid": MSO_LINE_DASH_STYLE.SOLID,
@@ -41,7 +43,12 @@ _DASH_STYLES = {
     "dot": MSO_LINE_DASH_STYLE.ROUND_DOT,
     "dashDot": MSO_LINE_DASH_STYLE.DASH_DOT,
 }
-_SHAPE_FIELDS = frozenset({"shape_type", "adjustments", "fill", "line", "effects", "rotation"})
+_SHAPE_FIELDS = frozenset(
+    {
+        "shape_type", "adjustments", "fill", "line", "effects", "rotation",
+        "flip_horizontal", "flip_vertical",
+    }
+)
 
 
 def _issue(path: str, detail: str, capability: str | None = None) -> ContractIssue:
@@ -66,6 +73,50 @@ def _valid_drawingml_angle(value: Any) -> bool:
         and 0 <= value < 360
         and 0 <= quantize_drawingml_angle(value) < DRAWINGML_FULL_CIRCLE
     )
+
+
+def _adjustment_defaults(shape_type: str) -> tuple[tuple[str, int], ...]:
+    return AutoShapeType.default_adjustment_values(_SHAPE_TYPES[shape_type])
+
+
+def _validate_adjustments(
+    shape_type: str,
+    values: Any,
+    path: str,
+) -> list[ContractIssue]:
+    expected = len(_adjustment_defaults(shape_type))
+    if values is None:
+        if shape_type == "roundRect":
+            return [_issue(
+                path,
+                "roundRect requires one explicit adjustment value",
+                "shape.roundRect.adjustment",
+            )]
+        return []
+    if not isinstance(values, list) or len(values) != expected:
+        return [_issue(
+            path,
+            f"{shape_type} requires exactly {expected} adjustment values",
+            "shape.preset.adjustments",
+        )]
+    if any(
+        type(value) not in {int, float}
+        or not math.isfinite(value)
+        or not -360 <= value <= 360
+        for value in values
+    ):
+        return [_issue(
+            path,
+            "preset adjustment values must be finite numbers from -360 to 360",
+            "shape.preset.adjustments",
+        )]
+    if shape_type == "roundRect" and not 0 < values[0] <= 0.5:
+        return [_issue(
+            path,
+            "roundRect adjustment must quantize from 1 to 50000",
+            "shape.roundRect.adjustment",
+        )]
+    return []
 
 
 def _unknown(value: Any, allowed: set[str], path: str) -> ContractIssue | None:
@@ -284,31 +335,13 @@ class ShapeRenderer:
         shape_type = style.get("shape_type")
         if shape_type not in _SHAPE_TYPES:
             return [_issue(f"{path}.style.shape_type", "unsupported shape type", f"shape.{shape_type}")]
-        if shape_type == "roundRect":
-            adjustments = style.get("adjustments")
-            invalid_shape = (
-                not isinstance(adjustments, list)
-                or len(adjustments) != 1
-                or not _number(adjustments[0])
-                or not 0 < adjustments[0] <= 0.5
-            )
-            quantized = (
-                None
-                if invalid_shape
-                else quantize_drawingml_percentage(adjustments[0])
-            )
-            if (
-                invalid_shape
-                or quantized is None
-                or not 1 <= quantized <= DRAWINGML_PERCENT_SCALE // 2
-            ):
-                return [_issue(
-                    f"{path}.style.adjustments",
-                    "roundRect adjustment must quantize from 1 to 50000",
-                    "shape.roundRect.adjustment",
-                )]
-        elif "adjustments" in style:
-            return [_issue(f"{path}.style.adjustments", "adjustments are supported only for roundRect")]
+        adjustment_issues = _validate_adjustments(
+            shape_type,
+            style.get("adjustments"),
+            f"{path}.style.adjustments",
+        )
+        if adjustment_issues:
+            return adjustment_issues
         if "fill" in style:
             issues = _validate_fill(style["fill"], f"{path}.style.fill")
             if issues:
@@ -324,6 +357,9 @@ class ShapeRenderer:
         rotation = style.get("rotation", 0)
         if not _number(rotation) or not -360 <= rotation <= 360:
             return [_issue(f"{path}.style.rotation", "rotation must be from -360 to 360 degrees")]
+        for field in ("flip_horizontal", "flip_vertical"):
+            if field in style and type(style[field]) is not bool:
+                return [_issue(f"{path}.style.{field}", "shape flip flags must be boolean", "shape.flip")]
         return []
 
     def render(self, element: dict[str, Any], context: RenderContext) -> None:
@@ -338,8 +374,18 @@ class ShapeRenderer:
         else:
             shape.line.fill.background()
         _apply_shadow(shape, style.get("effects"))
-        if style["shape_type"] == "roundRect":
-            set_round_rect_adjustment(shape, style["adjustments"], f"elements.{element['element_id']}.style.adjustments")
+        if "adjustments" in style:
+            set_preset_shape_adjustments(
+                shape,
+                style["adjustments"],
+                f"elements.{element['element_id']}.style.adjustments",
+            )
+        set_shape_flips(
+            shape,
+            style.get("flip_horizontal", False),
+            style.get("flip_vertical", False),
+            f"elements.{element['element_id']}.style",
+        )
         shape.rotation = style.get("rotation", 0)
         context.registry.register(
             element["element_id"], shape, "sp", semantic_kind="shape",

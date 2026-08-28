@@ -19,10 +19,54 @@ from .hashing import canonical_json_sha256
 CONTRACT_ID = "page-reconstruction-v2"
 SCHEMA_VERSION = 2
 
+BASIC_NATIVE_SHAPE_TYPES = frozenset(
+    {
+        # Rectangles.
+        "rectangle", "roundRect", "round1Rect", "round2SameRect",
+        "round2DiagRect", "snip1Rect", "snip2SameRect", "snip2DiagRect",
+        "snipRoundRect",
+        # Basic shapes.
+        "ellipse", "triangle", "rtTriangle", "parallelogram", "trapezoid",
+        "nonIsoscelesTrapezoid", "diamond", "pentagon", "hexagon",
+        "heptagon", "octagon", "decagon", "dodecagon", "plus", "frame",
+        "halfFrame", "corner", "diagStripe", "teardrop", "chord", "pie",
+        "pieWedge", "donut", "arc", "blockArc", "bracePair", "bracketPair",
+        "leftBrace", "rightBrace", "leftBracket", "rightBracket", "can",
+        "cube", "bevel", "foldedCorner", "plaque", "noSmoking", "smileyFace",
+        "heart", "lightningBolt", "sun", "moon", "cloud",
+        # Simple block arrows. Curved, circular, bent, multi-segment, and arrow
+        # callout presets deliberately remain on the local-asset path.
+        "rightArrow", "leftArrow", "upArrow", "downArrow", "leftRightArrow",
+        "upDownArrow", "quadArrow", "chevron", "homePlate",
+        "notchedRightArrow", "stripedRightArrow",
+        # Math shapes.
+        "mathPlus", "mathMinus", "mathMultiply", "mathDivide", "mathEqual",
+        "mathNotEqual",
+        # Flowchart shapes.
+        "flowChartAlternateProcess", "flowChartPunchedCard", "flowChartCollate",
+        "flowChartConnector", "flowChartInputOutput", "flowChartDecision",
+        "flowChartDelay", "flowChartMagneticDrum", "flowChartDisplay",
+        "flowChartDocument", "flowChartExtract", "flowChartInternalStorage",
+        "flowChartMagneticDisk", "flowChartManualInput",
+        "flowChartManualOperation", "flowChartMerge", "flowChartMultidocument",
+        "flowChartOfflineStorage", "flowChartOffpageConnector", "flowChartOr",
+        "flowChartPredefinedProcess", "flowChartPreparation", "flowChartProcess",
+        "flowChartPunchedTape", "flowChartMagneticTape", "flowChartSort",
+        "flowChartOnlineStorage", "flowChartSummingJunction",
+        "flowChartTerminator",
+        # Regular stars and simple area callouts.
+        "star4", "star5", "star6", "star7", "star8", "star10", "star12",
+        "star16", "star24", "star32", "wedgeRectCallout",
+        "wedgeRoundRectCallout", "wedgeEllipseCallout", "cloudCallout",
+    }
+)
+SHAPE_PRESET_XML_VALUES = {
+    shape_type: "rect" if shape_type == "rectangle" else shape_type
+    for shape_type in BASIC_NATIVE_SHAPE_TYPES
+}
+
 CANONICAL_VALUES = {
-    "shape_type": frozenset(
-        {"rectangle", "roundRect", "ellipse", "triangle", "chevron", "rightArrow"}
-    ),
+    "shape_type": BASIC_NATIVE_SHAPE_TYPES,
     "line_dash": frozenset({"solid", "dash", "dot", "dashDot"}),
     "line_arrow": frozenset(
         {"none", "triangle", "stealth", "diamond", "oval", "arrow"}
@@ -88,7 +132,10 @@ KIND_STYLE_FIELDS = {
         }
     ),
     "shape": frozenset(
-        {"shape_type", "adjustments", "fill", "line", "effects", "rotation"}
+        {
+            "shape_type", "adjustments", "fill", "line", "effects", "rotation",
+            "flip_horizontal", "flip_vertical",
+        }
     ),
     "line": frozenset({"line", "head_arrow", "tail_arrow", "rotation"}),
     "table": frozenset({"rotation"}),
@@ -252,6 +299,8 @@ PART_STYLE_FIELDS = frozenset(
         "line",
         "effects",
         "rotation",
+        "flip_horizontal",
+        "flip_vertical",
         "text_style",
     }
 )
@@ -295,10 +344,12 @@ MULTIPART_TEXT_STYLE_FIELDS = frozenset(
 REPRESENTATION_ITEM_FIELDS = frozenset(
     {
         "source_fact_id",
-        "semantic_role",
+        "visual_role",
+        "classification_basis",
+        "classification_evidence",
         "source_bbox",
         "required",
-        "selected_mode",
+        "render_mode",
         "required_editability",
         "fallback_policy",
         "bound_element_ids",
@@ -307,9 +358,66 @@ REPRESENTATION_ITEM_FIELDS = frozenset(
         "evidence",
     }
 )
-REPRESENTATION_MODES = frozenset({"native", "composite", "asset"})
+CLASSIFICATION_BASIS_VALUES = frozenset(
+    {
+        "editable_text",
+        "editable_data",
+        "text_adjacent_symbol",
+        "repeated_icon_slot",
+        "standalone_semantic_symbol",
+        "literal_image",
+        "structural_container",
+        "connector_path",
+        "connector_endpoint_node",
+        "diagram_geometry",
+        "data_chart",
+        "not_applicable",
+    }
+)
+CLASSIFICATION_EVIDENCE_FIELDS = frozenset(
+    {
+        "adjacent_text_fact_ids",
+        "repeat_group_id",
+        "attached_connector_fact_ids",
+        "contained_label_fact_ids",
+        "structural_boundary",
+        "full_contour_match",
+    }
+)
+VISUAL_ROLE_VALUES = frozenset(
+    {
+        "text",
+        "data",
+        "icon",
+        "pictogram",
+        "logo",
+        "photo",
+        "illustration",
+        "texture",
+        "ornament",
+        "container",
+        "connector",
+        "diagram_node",
+        "diagram_geometry",
+        "chart",
+        "background",
+    }
+)
+REPRESENTATION_MODES = frozenset(
+    {
+        "native_text",
+        "native_shape",
+        "native_line",
+        "native_table",
+        "native_chart",
+        "composite_native",
+        "picture_asset",
+    }
+)
 EDITABILITY_VALUES = frozenset({"full", "labels_and_geometry", "labels_only", "none"})
-FALLBACK_VALUES = frozenset({"forbid", "allow_minimal_asset"})
+FALLBACK_VALUES = frozenset(
+    {"forbid", "allow_minimal_asset", "required_source_asset"}
+)
 COVERAGE_VALUES = frozenset({"covered", "not_applicable"})
 ASSET_FIELDS = frozenset({"path", "asset_sha256", "pixel_size"})
 BACKGROUND_PROVENANCE_FIELDS = frozenset(
@@ -431,12 +539,24 @@ ICON_MODULE_FIELDS = frozenset(
         "slide_coordinate_unit",
         "clean_visual_reference",
         "clean_visual_sha256",
+        "families",
         "icons",
+    }
+)
+ICON_FAMILY_FIELDS = frozenset(
+    {
+        "family_id",
+        "expected_count",
+        "member_fact_ids",
+        "required_render_mode",
     }
 )
 ICON_ITEM_FIELDS = frozenset(
     {
         "icon_id",
+        "source_fact_id",
+        "family_id",
+        "slot_id",
         "element_id",
         "category",
         "instance_count",
@@ -841,13 +961,30 @@ _RECORDS: dict[str, dict[str, Any]] = {
             "items": _array(_ref("TypographyItem")),
         }
     ),
+    "ClassificationEvidence": _object(
+        {
+            "adjacent_text_fact_ids": _array(NON_EMPTY_STRING),
+            "repeat_group_id": {
+                "anyOf": [NON_EMPTY_STRING, {"type": "null"}]
+            },
+            "attached_connector_fact_ids": _array(NON_EMPTY_STRING),
+            "contained_label_fact_ids": _array(NON_EMPTY_STRING),
+            "structural_boundary": BOOLEAN,
+            "full_contour_match": BOOLEAN,
+        },
+        required=set(),
+    ),
     "RepresentationItem": _object(
         {
             "source_fact_id": NON_EMPTY_STRING,
-            "semantic_role": NON_EMPTY_STRING,
+            "visual_role": {"enum": sorted(VISUAL_ROLE_VALUES)},
+            "classification_basis": {
+                "enum": sorted(CLASSIFICATION_BASIS_VALUES)
+            },
+            "classification_evidence": _ref("ClassificationEvidence"),
             "source_bbox": BBOX,
             "required": BOOLEAN,
-            "selected_mode": {
+            "render_mode": {
                 "anyOf": [
                     {"enum": sorted(REPRESENTATION_MODES)},
                     {"type": "null"},
@@ -863,10 +1000,12 @@ _RECORDS: dict[str, dict[str, Any]] = {
         examples=[
             {
                 "source_fact_id": "fact-title",
-                "semantic_role": "title",
+                "visual_role": "text",
+                "classification_basis": "editable_text",
+                "classification_evidence": {},
                 "source_bbox": [80, 60, 640, 72],
                 "required": True,
-                "selected_mode": "native",
+                "render_mode": "native_text",
                 "required_editability": "full",
                 "fallback_policy": "forbid",
                 "bound_element_ids": ["title"],
@@ -907,6 +1046,9 @@ _RECORDS: dict[str, dict[str, Any]] = {
     "IconItem": _object(
         {
             "icon_id": NON_EMPTY_STRING,
+            "source_fact_id": NON_EMPTY_STRING,
+            "family_id": NON_EMPTY_STRING,
+            "slot_id": NON_EMPTY_STRING,
             "element_id": NON_EMPTY_STRING,
             "category": NON_EMPTY_STRING,
             "instance_count": POSITIVE_INTEGER,
@@ -918,7 +1060,7 @@ _RECORDS: dict[str, dict[str, Any]] = {
             "source_path": ABSOLUTE_PATH,
             "source_sha256": SHA256,
             "crop_mode": {"const": "alpha_isolation"},
-            "padding": NONNEGATIVE_INTEGER,
+            "padding": {"const": 0},
             "background_handling": NON_EMPTY_STRING,
             "asset_path": ABSOLUTE_PATH,
             "asset_sha256": SHA256,
@@ -934,6 +1076,9 @@ _RECORDS: dict[str, dict[str, Any]] = {
         examples=[
             {
                 "icon_id": "icon-001",
+                "source_fact_id": "fact-icon-001",
+                "family_id": "status-icons",
+                "slot_id": "slot-01",
                 "element_id": "icon-001",
                 "category": "status",
                 "instance_count": 1,
@@ -960,6 +1105,14 @@ _RECORDS: dict[str, dict[str, Any]] = {
             }
         ],
     ),
+    "IconFamily": _object(
+        {
+            "family_id": NON_EMPTY_STRING,
+            "expected_count": POSITIVE_INTEGER,
+            "member_fact_ids": _array(NON_EMPTY_STRING, minimum=1),
+            "required_render_mode": {"const": "picture_asset"},
+        }
+    ),
     "IconsModule": _object(
         {
             "schema_version": {"const": 2},
@@ -967,6 +1120,7 @@ _RECORDS: dict[str, dict[str, Any]] = {
             "slide_coordinate_unit": {"const": "EMU"},
             "clean_visual_reference": ABSOLUTE_PATH,
             "clean_visual_sha256": SHA256,
+            "families": _array(_ref("IconFamily"), minimum=1),
             "icons": _array(_ref("IconItem"), minimum=1),
         }
     ),
@@ -1241,16 +1395,18 @@ _RECORDS["ShapeStyle"] = _object(
             "type": "array",
             "items": {
                 "type": "number",
-                "exclusiveMinimum": 0,
-                "maximum": 0.5,
+                "minimum": -360,
+                "maximum": 360,
             },
             "minItems": 1,
-            "maxItems": 1,
+            "maxItems": 8,
         },
         "fill": _FILL,
         "line": _ref("Stroke"),
         "effects": _EFFECTS,
         "rotation": ROTATION,
+        "flip_horizontal": BOOLEAN,
+        "flip_vertical": BOOLEAN,
     },
     required=KIND_REQUIRED_STYLE_FIELDS["shape"],
 )
@@ -1400,6 +1556,8 @@ def _contract_payload() -> dict[str, Any]:
                 key: sorted(value) for key, value in sorted(CANONICAL_VALUES.items())
             },
             "modules": sorted(MODULE_NAMES),
+            "visual_roles": sorted(VISUAL_ROLE_VALUES),
+            "classification_bases": sorted(CLASSIFICATION_BASIS_VALUES),
             "representation_modes": sorted(REPRESENTATION_MODES),
             "background_modes": sorted(BACKGROUND_MODES),
             "background_roles": sorted(BACKGROUND_ROLES),

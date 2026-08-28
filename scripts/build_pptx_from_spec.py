@@ -116,7 +116,7 @@ def _asset_fallbacks(spec: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         dict(item)
         for item in sorted(items, key=lambda value: value["source_fact_id"])
-        if item["selected_mode"] == "asset"
+        if item["render_mode"] == "picture_asset"
     ]
 
 

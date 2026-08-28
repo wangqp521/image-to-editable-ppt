@@ -1,45 +1,64 @@
 # Rapid 交付
 
-## 适用范围
+本文件只定义 `verification_profile=rapid` 的状态、可选诊断和草稿合并。rapid 不读取 reviewed 尾链。
 
-本文件定义 rapid 专属的停止与交付合同。只有 `verification_profile=rapid` 时才读取本文件；`reviewed` 不读取、不继承 rapid 专属终态尾链，而是按其独立 reference 执行共享基础阶段和 reviewed 专属尾链。
+## 状态机
 
-每次首次或修复后重新进入 prebuild 前，页面规格必须显式写 `delivery_status=pending`；验证器不补默认值。完成视觉判断后只写 rapid 终态：`rapid_validated` 或 `rapid_validation_failed`。
+首次及每次修复后进入 prebuild 前，规格必须显式写 `delivery_status=pending`。prebuild 只接受 pending。
 
-## 草稿资格
+rapid 的硬交付资格只由四项草稿门禁决定：
 
-prebuild、build、structure 和 background 均不传 `--runtime`。structure/background、内容完整性和主要内容可编辑性硬门禁必须全部通过并绑定当前 PPTX 实际 SHA-256；TextBox/Run、图片化范围和 PPTX 可打开性也必须满足硬门禁。
+1. `structure`：当前单页 PPTX 可打开、16:9、结构有效，并与 structure report 的路径和 SHA-256 一致；
+2. `background`：background contract valid，且绑定当前 page、content spec 与 PPTX；
+3. `content_completeness`：`editability_gate.review.text_and_data=passed`；
+4. `main_editability`：`editability_gate.status=passed`，且 `text_and_data/native_text_structure/basic_structure/full_slide_picture_risk` 全部 passed。
 
-任一硬门禁失败时保留诊断并停止当前页面，不能进入视觉判断、草稿交付或合并。硬门禁全部通过后，页面才具备可编辑草稿交付资格。
+任一硬门禁失败时写 `rapid_validation_failed`，保留诊断并停止该页，不能生成有效 draft report、交付或合并。四项全部通过后，页面具备草稿交付资格；只有当前哈希 preview 可用、已完成整页语义判断且没有开放 P0/P1 时，才写 `rapid_validated`。主动跳过、preview 不可用，或一次集中修复后仍有开放 P0/P1 时写 `rapid_validation_failed`；只要四项门禁仍通过，后两种视觉失败仍可生成哈希绑定 draft report 并交付当前最佳草稿。摘要必须区分“硬门禁失败”“preview 未验证”和“视觉问题仍开放”。
 
-## Preview 与一次视觉判断
+preview 不属于四项草稿门禁：其缺失不能否定 structure、background、content completeness 或 main editability，也不能扣留已具备草稿资格的页面。但 preview 是 `rapid_validated` 的必需成功证据；主动跳过、LibreOffice command error、`SIGABRT`、无 PDF 或 Poppler 缺失时，不 preflight、不重试、不换字体、不重建，preview 不可用时写 `rapid_validation_failed`。`pdffonts` mismatch 或字体 fallback 本身只作诊断；preview 已成功且没有造成可见 P0/P1 时，不因此失败。
 
-preview 可按需对当前 PPTX 哈希尝试一次：
+## 可选视觉诊断与一次修复
+
+需要视觉诊断时，对当前 PPTX 哈希最多尝试一次：
 
 ```bash
 python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans GB" --output-dir preview/PPTX_SHA256
 ```
 
-`PPTX_SHA256` 必须替换为当前 PPTX 的实际哈希，preview 文件的直接父目录必须正是该哈希。同一 PPTX 哈希最多尝试一次。command error、`SIGABRT`、无 PDF/preview 或 Poppler 缺失时不 preflight、不重试、不切换 locale/fontconfig、不换字体、不重建，写 `rapid_validation_failed`；只要硬门禁仍通过，继续交付可编辑草稿。
+`PPTX_SHA256` 必须是当前 PPTX SHA-256，preview 文件的直接父目录必须正是该哈希。preview 可用时，主代理执行一次整页语义判断，一次列全 mapping、区域比例、层级、文字裁切/换行、框内位置、图形、表格、图表、crop、图片、图标和背景问题。所有发现项写入 `modules.high_risk.items[]`；P0/P1 只有 `result=passed` 才算关闭。`--stage draft` 对 `rapid_validated` 重新核对当前 preview 文件身份、父目录哈希、evidence 引用和已记录 P0/P1，不接受仅手写成功状态。
 
-preview 可用时，主代理执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、换行、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。文字必须在普通视图完整显示；仅在鼠标悬停或双击编辑态显示完整仍属于固定 TextBox 裁切，不能判为通过。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 时写 `rapid_validation_failed`；全部 P0/P1 可修复时进入唯一一次基础集中修复。字体 fallback、`pdffonts` mismatch 或 `matched=false` 本身只作诊断，只有造成可见裁切、错误换行、溢出或层级差异时才列为视觉问题。
+- P0：PPTX 不可用、核心内容缺失、主要内容不可编辑、数据编造；
+- P1：数量、比例、结构、fill、字号/换行、行/段距、Text Run、bullet、crop、connector、图表或关键装饰错误；
+- P2：不影响事实、可编辑性与主要版式的轻微色差、线宽或 renderer 近似。
 
-- P0：PPTX 不可用、核心内容缺失、主要内容不可编辑、数据编造。
-- P1：数量、比例、结构、fill、字号/换行、行/段距、框内位置、Text Run、bullet、crop、connector、图表或关键装饰错误。
-- P2：不影响事实、可编辑性和主要版式的轻微色差、线宽或 renderer 近似。
+全部 P0/P1 可修复时，最多进行一次集中修复：只改 `prepare_spec.py`，状态重置为 `pending`，从 prebuild 重跑 build、structure、background 和四门禁。可为新哈希再生成一次 preview，只用于确认已知问题是否关闭和是否新增 P0/P1；不得触发第二次修复。
 
-## 基础集中修复
+一次集中修复已经消耗后，修复轮次即耗尽。仍有文字裁切、换行或其他开放 P0/P1 时，不得新增字体测量、自动字号搜索、额外修复轮次或新的硬交付门禁；四门禁仍通过时必须写 `rapid_validation_failed`，生成 draft report 并交付当前最佳草稿。交付摘要披露 `page_id/element_id/位置与裁切方向/已尝试修复/当前影响`。P0 若实际证明内容完整性或主要可编辑性门禁不应通过，则属于硬门禁失败，不得生成有效 draft report。
 
-最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。不得复用旧哈希报告，也不得逐问题反复构建。
+## Draft report 与合并
 
-新 preview 可用时，主代理执行一次修复后终局语义复核，检查旧问题是否关闭以及是否新增 P0/P1。该终局复核不得触发第二次修复、再次渲染或 reviewed Final。无开放 P0/P1 时写 `rapid_validated`；仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。只要硬门禁仍通过，失败后仍继续交付 draft。
-
-## 交付
-
-`rapid_validated` 和 `rapid_validation_failed` 页面只要当前硬门禁仍通过，就使用 draft merger：
+写入 `rapid_validated`，或因一次修复后仍有开放 P0/P1 而写入 `rapid_validation_failed` 后，运行 `--stage draft` 重新读取并冻结当前规格和四项证据：
 
 ```bash
-python3 scripts/merge_pptx.py --draft --input page-001/work/page.pptx --input page-002/work/page.pptx --output final/deck-draft.pptx
+python3 scripts/validate_reconstruction_spec.py \
+  work/page-reconstruction.json \
+  --stage draft \
+  --output work/draft-validation.json
 ```
 
-draft merger 重新验证输入和合并后 deck 的 PPTX 结构；调用前必须已经确认每页 structure/background 当前哈希绑定。交付可编辑 PPTX、结构/背景报告以及实际存在的 preview/诊断，披露开放问题和不可用证据；不得因 preview 缺失或视觉校验失败扣留已经通过硬门禁的草稿，也不得把 rapid 草稿称为 reviewed 视觉审查通过版。
+draft report 必须 `valid=true`、`errors=[]`，并绑定当前完整 `spec_sha256`、delivery status、content spec、PPTX、structure report 与 background report。`rapid_validated` 还必须绑定当前哈希 preview 且没有已记录的开放 P0/P1；`rapid_validation_failed` 不要求 preview，只在四项草稿门禁仍全部 passed 时才能得到有效 draft report。硬门禁失败始终拒绝。规格、状态或任一文件变化后旧报告立即失效。
+
+多页草稿合并必须按相同顺序为每页提供一组 input、spec 和 `--draft-report`：
+
+```bash
+python3 scripts/merge_pptx.py --draft \
+  --input page-001/work/page.pptx \
+  --input page-002/work/page.pptx \
+  --spec page-001/work/page-reconstruction.json \
+  --spec page-002/work/page-reconstruction.json \
+  --draft-report page-001/work/draft-validation.json \
+  --draft-report page-002/work/draft-validation.json \
+  --output final/deck-draft.pptx
+```
+
+merger 会重新验证每页当前规格、四门禁报告与 PPTX 哈希，再验证合并后的 deck；不得只传 PPTX，也不得把 reviewed Final report 传入 draft。交付草稿 PPTX、draft/structure/background 报告及实际存在的 preview/诊断，披露开放视觉问题；不得称为视觉审查通过版。

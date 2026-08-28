@@ -1,0 +1,27 @@
+[
+  {
+    "id": "text-safety-free-and-constrained",
+    "prompt": "使用 rapid 模式把一张含长中文主标题、流程标签和多行能力卡正文的幻灯片截图还原为可编辑 PPTX。来源文字框较紧，但标题外侧有空白，卡片正文受容器边界限制。说明页面 prepare_spec.py 在首次 prebuild 前必须怎样处理这些文字，且不要引入字体测量引擎或全局 AutoFit。",
+    "expected": "显式区分 free_text 与 container_bound；自由文字按来源坐标预留 0.5em，受限容器不得越界；字号按页面物理 mapping 校准；垂直对齐必须显式；必要时仅对受限文字做最小字号修正。"
+  },
+  {
+    "id": "vertical-clipping-lightweight",
+    "prompt": "一个单行标题使用固定 TextBox、wrap=false、overflow=false，字号 30pt，框高只有 31pt，上下仍有来源空白。要求轻量防止上下裁切，同时保持高保真和可编辑性。应该怎样处理？",
+    "expected": "不启用 AutoFit，不使用字体度量搜索；把框高扩至至少 1.15em 并保持原垂直锚点，受限时才微调字号；不得靠移动 y、插空行或图片化掩盖。"
+  },
+  {
+    "id": "rich-textbox-with-text-safety",
+    "prompt": "一个来源标题 TextBox 内有两行文字，其中两段橙色、其余深灰，同时需要 free_text 的 0.5em 安全区与纵向容量优化。页面 prepare_spec.py 应如何同时保留可编辑结构和裁切优化？",
+    "expected": "把整个来源内容作为一个 TextBox 和一个 typography item，用连续 Text Run 表达多色样式，用 Paragraph/source_layout 保留真实段落与行中心；锁定结构后再对整个框应用 text_safety，不按可见行拆框。"
+  },
+  {
+    "id": "native-list-with-text-safety",
+    "prompt": "一个卡片正文 TextBox 含四个橙色项目符号列表项，文字受卡片边界约束，需要 container_bound 裁切保护。应该如何构建？",
+    "expected": "整个列表保持一个 TextBox，每项使用一个原生 Paragraph 和 buChar/buAutoNum/buBlip list 合同，保留 margin_left/indent/颜色/字号模式；再对整个框应用 container_bound text_safety，不把 bullet 生成独立 Shape 或 Picture。"
+  },
+  {
+    "id": "repair-budget-exhausted-delivery",
+    "prompt": "Rapid 模式已经用完唯一一次集中修复，复查仍发现一个文字框裁切，但 PPTX 可打开、内容对象仍存在且四项草稿门禁通过。是否应该阻止交付？说明最终状态和披露方式。",
+    "expected": "不得因开放视觉裁切阻止当前最佳 PPTX 交付；保持 rapid_validated，交付草稿并明确披露裁切对象、已尝试修复和未解决项；仅四项既有硬门禁失败时才无法生成有效 draft report。"
+  }
+]

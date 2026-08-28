@@ -20,7 +20,7 @@ from lib.geometry import (
 )
 
 from .common import RenderContext, register_renderer
-from .ooxml import set_round_rect_adjustment
+from .ooxml import set_preset_shape_adjustments, set_shape_flips
 from .shapes import (
     SHAPE_RENDERER,
     _SHAPE_TYPES,
@@ -294,12 +294,18 @@ class MultipartRenderer:
             else:
                 shape.line.fill.background()
             _apply_shadow(shape, style.get("effects"))
-            if style["shape_type"] == "roundRect":
-                set_round_rect_adjustment(
+            if "adjustments" in style:
+                set_preset_shape_adjustments(
                     shape,
                     style["adjustments"],
                     f"elements.{element_id}.parts.{part['part_id']}.style.adjustments",
                 )
+            set_shape_flips(
+                shape,
+                style.get("flip_horizontal", False),
+                style.get("flip_vertical", False),
+                f"elements.{element_id}.parts.{part['part_id']}.style",
+            )
             shape.rotation = style.get("rotation", 0)
             content = part.get("content", {})
             has_text = isinstance(content, dict) and "text" in content

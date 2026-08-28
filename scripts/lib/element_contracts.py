@@ -6,14 +6,15 @@ import copy
 import math
 from typing import Any
 
+from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+from pptx.shapes.autoshape import AutoShapeType
+
 from .capabilities import BUILDABLE_KINDS, require_supported_value
 from .error_codes import ContractIssue, ToolError
 from .geometry import (
-    DRAWINGML_PERCENT_SCALE,
     bbox_contains,
     bbox_overlaps,
     bbox_union,
-    quantize_drawingml_percentage,
     valid_drawingml_rotation,
     valid_font_size_pt,
     valid_nonnegative_coordinate32,
@@ -47,6 +48,7 @@ from .schema_contracts import (
     PART_CONTENT_FIELDS,
     PART_FIELDS,
     PART_STYLE_FIELDS,
+    SHAPE_PRESET_XML_VALUES,
     TABLE_BORDER_FIELDS,
     TABLE_BORDER_SIDES,
     TABLE_CELL_FIELDS,
@@ -149,34 +151,48 @@ def expand_multipart_parts(element: dict[str, Any]) -> list[dict[str, Any]]:
     return expanded
 
 
-def _validate_round_rect(style: dict[str, Any], path: str) -> list[ContractIssue]:
-    if style.get("shape_type") != "roundRect":
+def _validate_shape_adjustments(style: dict[str, Any], path: str) -> list[ContractIssue]:
+    shape_type = style.get("shape_type")
+    if shape_type not in SHAPE_PRESET_XML_VALUES:
         return []
+    preset = MSO_AUTO_SHAPE_TYPE.from_xml(SHAPE_PRESET_XML_VALUES[shape_type])
+    expected = len(AutoShapeType.default_adjustment_values(preset))
     adjustments = style.get("adjustments")
-    invalid_shape = (
-        not isinstance(adjustments, list)
-        or len(adjustments) != 1
-        or type(adjustments[0]) not in {int, float}
-        or not 0 < adjustments[0] <= 0.5
-    )
-    quantized = (
-        None
-        if invalid_shape
-        else quantize_drawingml_percentage(adjustments[0])
-    )
-    if (
-        invalid_shape
-        or quantized is None
-        or not 1 <= quantized <= DRAWINGML_PERCENT_SCALE // 2
-    ):
-        return [
-            _issue(
+    if adjustments is None:
+        if shape_type == "roundRect":
+            return [_issue(
                 "UNSUPPORTED_CAPABILITY",
                 f"{path}.adjustments",
-                "roundRect adjustment must quantize from 1 to 50000",
+                "roundRect requires one explicit adjustment value",
                 "shape.roundRect.adjustment",
-            )
-        ]
+            )]
+        return []
+    if not isinstance(adjustments, list) or len(adjustments) != expected:
+        return [_issue(
+            "UNSUPPORTED_CAPABILITY",
+            f"{path}.adjustments",
+            f"{shape_type} requires exactly {expected} adjustment values",
+            "shape.preset.adjustments",
+        )]
+    if any(
+        type(value) not in {int, float}
+        or not math.isfinite(value)
+        or not -360 <= value <= 360
+        for value in adjustments
+    ):
+        return [_issue(
+            "UNSUPPORTED_CAPABILITY",
+            f"{path}.adjustments",
+            "preset adjustment values must be finite numbers from -360 to 360",
+            "shape.preset.adjustments",
+        )]
+    if shape_type == "roundRect" and not 0 < adjustments[0] <= 0.5:
+        return [_issue(
+            "UNSUPPORTED_CAPABILITY",
+            f"{path}.adjustments",
+            "roundRect adjustment must quantize from 1 to 50000",
+            "shape.roundRect.adjustment",
+        )]
     return []
 
 
@@ -269,6 +285,14 @@ def _validate_part_style_capabilities(
             f"{path}.rotation",
             "rotation must have a faithful DrawingML value within (-360, 360)",
         )]
+    for field in ("flip_horizontal", "flip_vertical"):
+        if field in style and type(style[field]) is not bool:
+            return [_issue(
+                "UNSUPPORTED_CAPABILITY",
+                f"{path}.{field}",
+                "shape flip flags must be boolean",
+                "shape.flip",
+            )]
     if "shape_type" in style:
         try:
             require_supported_value("shape_type", style["shape_type"], f"{path}.shape_type")
@@ -1154,7 +1178,15 @@ def validate_element_contract(element: Any) -> list[ContractIssue]:
             require_supported_value("shape_type", style["shape_type"], f"{path}.style.shape_type")
         except ToolError as exc:
             return [_issue(exc.code, exc.path, exc.detail, exc.capability)]
-        return _validate_round_rect(style, f"{path}.style")
+        for field in ("flip_horizontal", "flip_vertical"):
+            if field in style and type(style[field]) is not bool:
+                return [_issue(
+                    "UNSUPPORTED_CAPABILITY",
+                    f"{path}.style.{field}",
+                    "shape flip flags must be boolean",
+                    "shape.flip",
+                )]
+        return _validate_shape_adjustments(style, f"{path}.style")
     if kind == "line" and isinstance(style.get("line"), dict) and "dash" in style["line"]:
         try:
             require_supported_value("line_dash", style["line"]["dash"], f"{path}.style.line.dash")
