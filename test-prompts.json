@@ -1,0 +1,27 @@
+[
+  {
+    "id": "free-left-safe-span",
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的左对齐自由文本。原始可见文字框 source_bbox=[100,60,240,32]，所属水平安全跨度已经盘点为 [100,620]，20pt，多 Text Run，右侧没有前景障碍。请给出首次构建采用的最终 source_bbox，并说明哪些排版属性保持不变。",
+    "expected": "最终 source_bbox 为 [100,60,520,32]；左锚点及 y/h 不变，margins、字号、Text Run、wrap 和 overflow 不变；不使用固定 0.5em 补偿。"
+  },
+  {
+    "id": "free-right-safe-span",
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的右对齐自由文本。原始 source_bbox=[700,80,200,32]，已确认安全跨度为 [480,900]。请给出最终 source_bbox 和必须保持的锚点。",
+    "expected": "最终 source_bbox 为 [480,80,420,32]；原始右边界 900 保持不变，y/h、margins、字号、wrap 和 overflow 不变。"
+  },
+  {
+    "id": "free-center-safe-span",
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的居中标题。原始 source_bbox=[400,50,200,40]，中心为 500，已确认安全跨度为 [220,780]。请给出最终 source_bbox。",
+    "expected": "最终 source_bbox 为 [220,50,560,40]；文本框中心 500、y/h、margins、字号、wrap 和 overflow 保持不变。"
+  },
+  {
+    "id": "constrained-card-fallback",
+    "prompt": "使用 image-to-editable-ppt 处理卡片内的左对齐单行文字。文字原始 source_bbox=[130,120,220,30]，卡片内部可用范围为 [120,500]，右侧前景图标与编辑安全间隔共同形成 safe_right=438；原图 wrap=false。请给出一线处理以及仍不足时的处理顺序。",
+    "expected": "先扩展到 [130,120,308,30]，不得越过 safe_right；仍不足时只回收右 margin；原图 wrap=false 因而不得改成换行；仅在确认生成字形偏大时按比例调整同一语义组字号；不得 AutoFit、overflow、清空全部 margin 或转图片。"
+  },
+  {
+    "id": "wrapped-text-no-free-expansion",
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框但 wrap=true 的两行说明文字，原始 source_bbox=[160,260,320,86]，当前换行与原图一致，左右还有空白。是否应套用自由单行文字的安全跨度扩框？请给出处理结论。",
+    "expected": "不得套用自由单行公式；保持原始宽度和换行结构，只有出现实际裁切且来源布局允许时才按受限文字规则处理。"
+  }
+]

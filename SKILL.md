@@ -36,7 +36,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
 
-首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字。无填充、无边框的自由文本按 alignment 只向需要容量的一侧预留 `0.5em`：`left` 向右、`right` 向左、`center` 左右各扩；必须先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox`，保持 margins、字号、换行和视觉锚点。页面边界、表格、卡片等受限容器依次处理 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字或清零全部 margin。preview 只验证残余裁切；精确公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
+首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。所有无填充、无边框、水平、`wrap=false` 且 `alignment=left|right|center` 的自由单行文字，不再先判断“高风险”或固定增加 `0.5em/1.0em`；必须根据现有元素盘点确定所属水平通道的 `safe_left/safe_right`，按 alignment 扩展到安全跨度：`left` 保持左锚点并扩到 `safe_right`，`right` 保持右锚点并扩到 `safe_left`，`center` 保持中心并对称扩展。先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox` 并同步 typography `text_box`；保持 y/h、margins、字号、Text Run、换行、overflow 和视觉锚点。`wrap=true`、有可见容器、邻近前景元素、页面硬边界或 `justify|distributed` 等受限文字，依次处理容器内 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字、清零全部 margin 或把文字图片化。preview 必须在普通视图检查首尾字符、意外换行和新增重叠；预览不可用时按当前 profile 标记视觉未验证，不得宣称裁切已解决。精确边界、公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
 
 简单 2D `pie|doughnut|column|bar|line` 在分类、系列、数值、轴、图例与标签均可确认时使用原生 Chart。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足时保留当页最小局部 picture。
 
