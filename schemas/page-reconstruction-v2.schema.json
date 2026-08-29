@@ -872,51 +872,6 @@
       ],
       "type": "object"
     },
-    "ClassificationEvidence": {
-      "additionalProperties": false,
-      "properties": {
-        "adjacent_text_fact_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "attached_connector_fact_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "contained_label_fact_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "full_contour_match": {
-          "type": "boolean"
-        },
-        "repeat_group_id": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "structural_boundary": {
-          "type": "boolean"
-        }
-      },
-      "required": [],
-      "type": "object"
-    },
     "CoordinateGrid": {
       "additionalProperties": false,
       "properties": {
@@ -1513,37 +1468,6 @@
       ],
       "type": "object"
     },
-    "IconFamily": {
-      "additionalProperties": false,
-      "properties": {
-        "expected_count": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "family_id": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "member_fact_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "required_render_mode": {
-          "const": "picture_asset"
-        }
-      },
-      "required": [
-        "expected_count",
-        "family_id",
-        "member_fact_ids",
-        "required_render_mode"
-      ],
-      "type": "object"
-    },
     "IconItem": {
       "additionalProperties": false,
       "examples": [
@@ -1555,7 +1479,6 @@
           "category": "status",
           "crop_mode": "alpha_isolation",
           "element_id": "icon-001",
-          "family_id": "status-icons",
           "final_height": 48,
           "final_width": 48,
           "icon_id": "icon-001",
@@ -1574,14 +1497,12 @@
             365760,
             365760
           ],
-          "slot_id": "slot-01",
           "source_bbox": [
             720,
             200,
             48,
             48
           ],
-          "source_fact_id": "fact-icon-001",
           "source_path": "/absolute/source.png",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "validation": "passed"
@@ -1616,10 +1537,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "family_id": {
-          "minLength": 1,
-          "type": "string"
-        },
         "final_height": {
           "minimum": 1,
           "type": "integer"
@@ -1647,7 +1564,8 @@
           "const": "picture"
         },
         "padding": {
-          "const": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "repeat_group": {
           "type": [
@@ -1692,10 +1610,6 @@
           ],
           "type": "array"
         },
-        "slot_id": {
-          "minLength": 1,
-          "type": "string"
-        },
         "source_bbox": {
           "items": false,
           "maxItems": 4,
@@ -1720,10 +1634,6 @@
           ],
           "type": "array"
         },
-        "source_fact_id": {
-          "minLength": 1,
-          "type": "string"
-        },
         "source_path": {
           "minLength": 2,
           "pattern": "^/",
@@ -1745,7 +1655,6 @@
         "category",
         "crop_mode",
         "element_id",
-        "family_id",
         "final_height",
         "final_width",
         "icon_id",
@@ -1759,9 +1668,7 @@
         "semantic_scope",
         "sharpness",
         "slide_bbox",
-        "slot_id",
         "source_bbox",
-        "source_fact_id",
         "source_path",
         "source_sha256",
         "validation"
@@ -1797,13 +1704,6 @@
           "pattern": "^[0-9a-fA-F]{64}$",
           "type": "string"
         },
-        "families": {
-          "items": {
-            "$ref": "#/$defs/IconFamily"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
         "icons": {
           "items": {
             "$ref": "#/$defs/IconItem"
@@ -1825,7 +1725,6 @@
       "required": [
         "clean_visual_reference",
         "clean_visual_sha256",
-        "families",
         "icons",
         "page_id",
         "schema_version",
@@ -2465,25 +2364,23 @@
           "bound_element_ids": [
             "title"
           ],
-          "classification_basis": "editable_text",
-          "classification_evidence": {},
           "coverage_status": "covered",
           "evidence": [
             "/absolute/work/measurement.json"
           ],
           "fallback_policy": "forbid",
           "reason": "source title is editable text",
-          "render_mode": "native_text",
           "required": true,
           "required_editability": "full",
+          "selected_mode": "native",
+          "semantic_role": "title",
           "source_bbox": [
             80,
             60,
             640,
             72
           ],
-          "source_fact_id": "fact-title",
-          "visual_role": "text"
+          "source_fact_id": "fact-title"
         }
       ],
       "properties": {
@@ -2493,25 +2390,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "classification_basis": {
-          "enum": [
-            "connector_endpoint_node",
-            "connector_path",
-            "data_chart",
-            "diagram_geometry",
-            "editable_data",
-            "editable_text",
-            "literal_image",
-            "not_applicable",
-            "repeated_icon_slot",
-            "standalone_semantic_symbol",
-            "structural_container",
-            "text_adjacent_symbol"
-          ]
-        },
-        "classification_evidence": {
-          "$ref": "#/$defs/ClassificationEvidence"
         },
         "coverage_status": {
           "enum": [
@@ -2530,31 +2408,12 @@
         "fallback_policy": {
           "enum": [
             "allow_minimal_asset",
-            "forbid",
-            "required_source_asset"
+            "forbid"
           ]
         },
         "reason": {
           "minLength": 1,
           "type": "string"
-        },
-        "render_mode": {
-          "anyOf": [
-            {
-              "enum": [
-                "composite_native",
-                "native_chart",
-                "native_line",
-                "native_shape",
-                "native_table",
-                "native_text",
-                "picture_asset"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "required": {
           "type": "boolean"
@@ -2566,6 +2425,24 @@
             "labels_only",
             "none"
           ]
+        },
+        "selected_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "asset",
+                "composite",
+                "native"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semantic_role": {
+          "minLength": 1,
+          "type": "string"
         },
         "source_bbox": {
           "items": false,
@@ -2594,41 +2471,20 @@
         "source_fact_id": {
           "minLength": 1,
           "type": "string"
-        },
-        "visual_role": {
-          "enum": [
-            "background",
-            "chart",
-            "connector",
-            "container",
-            "data",
-            "diagram_geometry",
-            "diagram_node",
-            "icon",
-            "illustration",
-            "logo",
-            "ornament",
-            "photo",
-            "pictogram",
-            "text",
-            "texture"
-          ]
         }
       },
       "required": [
         "bound_element_ids",
-        "classification_basis",
-        "classification_evidence",
         "coverage_status",
         "evidence",
         "fallback_policy",
         "reason",
-        "render_mode",
         "required",
         "required_editability",
+        "selected_mode",
+        "semantic_role",
         "source_bbox",
-        "source_fact_id",
-        "visual_role"
+        "source_fact_id"
       ],
       "type": "object"
     },
@@ -2727,11 +2583,11 @@
       "properties": {
         "adjustments": {
           "items": {
-            "maximum": 360,
-            "minimum": -360,
+            "exclusiveMinimum": 0,
+            "maximum": 0.5,
             "type": "number"
           },
-          "maxItems": 8,
+          "maxItems": 1,
           "minItems": 1,
           "type": "array"
         },
@@ -2758,12 +2614,6 @@
             }
           ]
         },
-        "flip_horizontal": {
-          "type": "boolean"
-        },
-        "flip_vertical": {
-          "type": "boolean"
-        },
         "line": {
           "$ref": "#/$defs/Stroke"
         },
@@ -2774,118 +2624,12 @@
         },
         "shape_type": {
           "enum": [
-            "arc",
-            "bevel",
-            "blockArc",
-            "bracePair",
-            "bracketPair",
-            "can",
             "chevron",
-            "chord",
-            "cloud",
-            "cloudCallout",
-            "corner",
-            "cube",
-            "decagon",
-            "diagStripe",
-            "diamond",
-            "dodecagon",
-            "donut",
-            "downArrow",
             "ellipse",
-            "flowChartAlternateProcess",
-            "flowChartCollate",
-            "flowChartConnector",
-            "flowChartDecision",
-            "flowChartDelay",
-            "flowChartDisplay",
-            "flowChartDocument",
-            "flowChartExtract",
-            "flowChartInputOutput",
-            "flowChartInternalStorage",
-            "flowChartMagneticDisk",
-            "flowChartMagneticDrum",
-            "flowChartMagneticTape",
-            "flowChartManualInput",
-            "flowChartManualOperation",
-            "flowChartMerge",
-            "flowChartMultidocument",
-            "flowChartOfflineStorage",
-            "flowChartOffpageConnector",
-            "flowChartOnlineStorage",
-            "flowChartOr",
-            "flowChartPredefinedProcess",
-            "flowChartPreparation",
-            "flowChartProcess",
-            "flowChartPunchedCard",
-            "flowChartPunchedTape",
-            "flowChartSort",
-            "flowChartSummingJunction",
-            "flowChartTerminator",
-            "foldedCorner",
-            "frame",
-            "halfFrame",
-            "heart",
-            "heptagon",
-            "hexagon",
-            "homePlate",
-            "leftArrow",
-            "leftBrace",
-            "leftBracket",
-            "leftRightArrow",
-            "lightningBolt",
-            "mathDivide",
-            "mathEqual",
-            "mathMinus",
-            "mathMultiply",
-            "mathNotEqual",
-            "mathPlus",
-            "moon",
-            "noSmoking",
-            "nonIsoscelesTrapezoid",
-            "notchedRightArrow",
-            "octagon",
-            "parallelogram",
-            "pentagon",
-            "pie",
-            "pieWedge",
-            "plaque",
-            "plus",
-            "quadArrow",
             "rectangle",
             "rightArrow",
-            "rightBrace",
-            "rightBracket",
-            "round1Rect",
-            "round2DiagRect",
-            "round2SameRect",
             "roundRect",
-            "rtTriangle",
-            "smileyFace",
-            "snip1Rect",
-            "snip2DiagRect",
-            "snip2SameRect",
-            "snipRoundRect",
-            "star10",
-            "star12",
-            "star16",
-            "star24",
-            "star32",
-            "star4",
-            "star5",
-            "star6",
-            "star7",
-            "star8",
-            "stripedRightArrow",
-            "sun",
-            "teardrop",
-            "trapezoid",
-            "triangle",
-            "upArrow",
-            "upDownArrow",
-            "wedgeEllipseCallout",
-            "wedgeRectCallout",
-            "wedgeRoundRectCallout"
+            "triangle"
           ]
         }
       },
@@ -3518,5 +3262,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "08fe558b67aa0a799e814f65a47cad420f0d5efe99e355f15d412114ce24a205"
+  "x-schema-contract-sha256": "da5a531de1de768f54ee407032eed3da9d391628b19c8308ceb526329f82f260"
 }

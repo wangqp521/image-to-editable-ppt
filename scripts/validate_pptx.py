@@ -21,8 +21,6 @@ from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 from PIL import Image
-from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.shapes.autoshape import AutoShapeType
 
 SCRIPTS_ROOT = Path(__file__).resolve().parent
 if str(SCRIPTS_ROOT) not in sys.path:
@@ -43,7 +41,7 @@ from lib.representation_contracts import (
     representation_summary,
     validate_representation_plan,
 )
-from lib.schema_contracts import BACKGROUND_ITEM_FIELDS, SHAPE_PRESET_XML_VALUES
+from lib.schema_contracts import BACKGROUND_ITEM_FIELDS
 from lib.spec_identity import content_spec_sha256, input_spec_sha256
 
 
@@ -515,28 +513,20 @@ def _collect_visible_objects(
     return records
 
 
-def _preset_shape_contract(shape: ET.Element) -> dict[str, Any] | None:
+def _round_rect_adjustment(shape: ET.Element) -> tuple[str | None, int | None]:
     geometry = shape.find("p:spPr/a:prstGeom", NS)
-    if geometry is None or not geometry.get("prst"):
-        return None
-    guides: list[dict[str, Any]] = []
-    guides_valid = True
-    for guide in geometry.findall("a:avLst/a:gd", NS):
-        match = re.fullmatch(r"val\s+(-?\d+)", guide.get("fmla", "").strip())
-        if match is None or not guide.get("name"):
-            guides_valid = False
-            continue
-        guides.append({"name": guide.get("name"), "value": int(match.group(1))})
-    transform = shape.find("p:spPr/a:xfrm", NS)
-    return {
-        "preset_geometry": geometry.get("prst"),
-        "adjustment_guides": guides,
-        "adjustment_guides_valid": guides_valid,
-        "flip_horizontal": transform is not None
-        and transform.get("flipH", "0").lower() in {"1", "true", "on"},
-        "flip_vertical": transform is not None
-        and transform.get("flipV", "0").lower() in {"1", "true", "on"},
-    }
+    if geometry is None or geometry.get("prst") != "roundRect":
+        return None, None
+    adjustment = geometry.find("a:avLst/a:gd[@name='adj']", NS)
+    if adjustment is None:
+        return "missing", None
+    match = re.fullmatch(r"val\s+(-?\d+)", adjustment.get("fmla", "").strip())
+    if match is None:
+        return "invalid", None
+    value = int(match.group(1))
+    if not 1 <= value <= 50_000:
+        return "invalid", value
+    return "valid", value
 
 
 def _scripts_in_text(text: str) -> list[str]:
@@ -1089,10 +1079,9 @@ def _validate_build_report_shape(report: dict[str, Any]) -> None:
             "BUILD_REPORT_INVALID", "build_report.normalization is invalid"
         )
     summary = report.get("representation_summary")
-    expected_summary_fields = set(representation_summary({}))
     if (
         not isinstance(summary, dict)
-        or set(summary) != expected_summary_fields
+        or set(summary) != {"asset", "composite", "native", "not_applicable"}
         or not all(type(value) is int and value >= 0 for value in summary.values())
     ):
         raise ValidationError(
@@ -1145,24 +1134,21 @@ def _validate_build_report_shape(report: dict[str, Any]) -> None:
             set(fallback) != REPRESENTATION_FACT_FIELDS
             or not isinstance(fallback.get("source_fact_id"), str)
             or not fallback["source_fact_id"].strip()
-            or not isinstance(fallback.get("visual_role"), str)
-            or not fallback["visual_role"].strip()
+            or not isinstance(fallback.get("semantic_role"), str)
+            or not fallback["semantic_role"].strip()
             or not isinstance(source_bbox, list)
             or len(source_bbox) != 4
             or not all(type(value) is int for value in source_bbox)
             or source_bbox[2] <= 0
             or source_bbox[3] <= 0
             or type(fallback.get("required")) is not bool
-            or fallback.get("render_mode") != "picture_asset"
+            or fallback.get("selected_mode") != "asset"
             or fallback.get("required_editability") not in {
                 "none",
                 "labels_only",
                 "labels_and_geometry",
             }
-            or fallback.get("fallback_policy") not in {
-                "allow_minimal_asset",
-                "required_source_asset",
-            }
+            or fallback.get("fallback_policy") != "allow_minimal_asset"
             or not isinstance(bindings, list)
             or not bindings
             or not all(isinstance(value, str) and value for value in bindings)
@@ -2327,66 +2313,6 @@ def _validate_element_bindings(
         result["element_bindings_checked"] = result.get("element_bindings_checked", 0) + 1
 
 
-def _validate_native_shape_contracts(
-    result: dict[str, Any],
-    spec: dict[str, Any],
-) -> None:
-    elements = spec.get("elements")
-    if not isinstance(elements, list):
-        return
-    shape_elements = [
-        element
-        for element in elements
-        if isinstance(element, dict)
-        and element.get("kind") == "shape"
-        and isinstance(element.get("element_id"), str)
-    ]
-    if not shape_elements:
-        return
-    element_ids = {element["element_id"] for element in shape_elements}
-    observed_by_id: dict[str, list[dict[str, Any]]] = {}
-    for observed in result.get("native_shape_objects", []):
-        element_id = _bound_element_id(observed.get("object_name"), element_ids)
-        if element_id is not None:
-            observed_by_id.setdefault(element_id, []).append(observed)
-    for element in shape_elements:
-        element_id = element["element_id"]
-        style = element.get("style")
-        if not isinstance(style, dict):
-            continue
-        shape_type = style.get("shape_type")
-        expected_preset = SHAPE_PRESET_XML_VALUES.get(shape_type)
-        if expected_preset is None:
-            continue
-        expected_guides: list[dict[str, Any]] = []
-        adjustments = style.get("adjustments")
-        if isinstance(adjustments, list):
-            preset = MSO_AUTO_SHAPE_TYPE.from_xml(expected_preset)
-            defaults = AutoShapeType.default_adjustment_values(preset)
-            if len(defaults) == len(adjustments):
-                expected_guides = [
-                    {"name": name, "value": int(value * 100_000)}
-                    for (name, _default), value in zip(defaults, adjustments)
-                ]
-        expected_horizontal = style.get("flip_horizontal", False)
-        expected_vertical = style.get("flip_vertical", False)
-        matched = any(
-            observed.get("preset_geometry") == expected_preset
-            and observed.get("adjustment_guides_valid") is True
-            and observed.get("adjustment_guides") == expected_guides
-            and observed.get("flip_horizontal") is expected_horizontal
-            and observed.get("flip_vertical") is expected_vertical
-            for observed in observed_by_id.get(element_id, [])
-        )
-        if not matched:
-            _report_error(
-                result,
-                "NATIVE_SHAPE_CONTRACT_MISMATCH",
-                f"elements.{element_id}",
-                "preset geometry, adjustments, or flip flags differ from the spec",
-            )
-
-
 def _validate_report_object_bindings(
     result: dict[str, Any], report: dict[str, Any]
 ) -> None:
@@ -2891,7 +2817,7 @@ def _validate_schema_report_contract(
     expected_fallbacks = [
         dict(item)
         for item in sorted(facts, key=lambda value: value.get("source_fact_id", ""))
-        if isinstance(item, dict) and item.get("render_mode") == "picture_asset"
+        if isinstance(item, dict) and item.get("selected_mode") == "asset"
     ]
     actual_fallbacks = report.get("asset_fallbacks")
     if actual_fallbacks != expected_fallbacks:
@@ -3962,31 +3888,20 @@ def validate_pptx(
                             "x", "y", "cx", "cy", "has_text", "geometry_known", "visible",
                         )
                     }
-                    preset_contract = _preset_shape_contract(shape)
-                    if preset_contract is not None:
-                        native.update(preset_contract)
-                    if (
-                        preset_contract is not None
-                        and preset_contract["preset_geometry"] == "roundRect"
-                    ):
-                        guides = preset_contract["adjustment_guides"]
-                        round_rect_valid = (
-                            preset_contract["adjustment_guides_valid"] is True
-                            and len(guides) == 1
-                            and guides[0].get("name") == "adj"
-                            and type(guides[0].get("value")) is int
-                            and 1 <= guides[0]["value"] <= 50_000
+                    round_rect_status, round_rect_adjustment = _round_rect_adjustment(shape)
+                    if round_rect_status is not None:
+                        native["preset_geometry"] = "roundRect"
+                        native["corner_adjustment"] = round_rect_adjustment
+                    if round_rect_status == "missing":
+                        result["errors"].append("ROUND_RECT_ADJUSTMENT_MISSING")
+                        result["warnings"].append(
+                            f"{slide_part} shape {shape_record['object_id']} uses default roundRect adjustment"
                         )
-                        if not guides:
-                            result["errors"].append("ROUND_RECT_ADJUSTMENT_MISSING")
-                            result["warnings"].append(
-                                f"{slide_part} shape {shape_record['object_id']} uses default roundRect adjustment"
-                            )
-                        elif not round_rect_valid:
-                            result["errors"].append("ROUND_RECT_ADJUSTMENT_INVALID")
-                            result["warnings"].append(
-                                f"{slide_part} shape {shape_record['object_id']} has invalid roundRect adjustment"
-                            )
+                    elif round_rect_status == "invalid":
+                        result["errors"].append("ROUND_RECT_ADJUSTMENT_INVALID")
+                        result["warnings"].append(
+                            f"{slide_part} shape {shape_record['object_id']} has invalid roundRect adjustment"
+                        )
                     result["native_shape_objects"].append(native)
                     if shape_record["has_text"]:
                         text_object = _text_object(
@@ -4123,7 +4038,6 @@ def validate_pptx(
             if spec is not None:
                 _validate_native_list_contracts(result, spec, width, height)
                 _validate_native_chart_contracts(result, spec)
-                _validate_native_shape_contracts(result, spec)
                 _validate_text_run_contracts(result, spec, width, height)
                 _validate_element_bindings(result, spec, width, height)
             if report is not None:

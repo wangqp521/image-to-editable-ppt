@@ -34,7 +34,6 @@ from lib.capabilities import (
 )
 from lib.element_contracts import validate_element_contract
 from lib.error_codes import ToolError
-from lib.draft_delivery_contracts import draft_delivery_summary
 from lib.final_identity import collect_current_artifacts
 from lib.font_runtime import validate_font_runtime
 from lib.representation_contracts import require_asset, validate_representation_plan
@@ -45,7 +44,6 @@ from lib.schema_io import (
 )
 from lib.schema_contracts import (
     ELEMENT_FIELDS,
-    ICON_FAMILY_FIELDS,
     ICON_ITEM_FIELDS,
     ICON_MODULE_FIELDS,
     schema_envelope_issues,
@@ -274,8 +272,6 @@ def _validate_verification_identity(
     spec: dict[str, Any],
     profile: str,
     errors: list[dict[str, str]],
-    *,
-    stage: str,
 ) -> None:
     explicit_profile = spec.get("verification_profile")
     if explicit_profile is not None and explicit_profile not in VERIFICATION_PROFILES:
@@ -295,13 +291,6 @@ def _validate_verification_identity(
             "SPEC_DELIVERY_STATUS_INVALID",
             "delivery_status",
             f"delivery_status is invalid for {profile} verification",
-        )
-    elif stage == "prebuild" and delivery_status != "pending":
-        _error(
-            errors,
-            "SPEC_DELIVERY_STATUS_INVALID",
-            "delivery_status",
-            "prebuild requires delivery_status=pending",
         )
 
 
@@ -336,7 +325,7 @@ def _validate_canonical_element_rotation(
     stage: str,
     errors: list[dict[str, str]],
 ) -> None:
-    if stage in {"draft", "final"}:
+    if stage == "final":
         return
     style = element.get("style")
     if not isinstance(style, dict):
@@ -574,7 +563,7 @@ def _validate_coordinate_overlay_evidence(
     if declared_manifest.lower() != metadata_manifest:
         _error(errors, "SPEC_COORDINATE_OVERLAY_EVIDENCE_STALE", path, "coordinate overlay manifest differs from PNG metadata")
         return
-    if stage in {"draft", "final"}:
+    if stage == "final":
         return
     try:
         coordinate_module = _load_coordinate_overlay_module()
@@ -1061,8 +1050,6 @@ def _validate_icons(
     page_id: Any,
     stage: str,
     errors: list[dict[str, str]],
-    *,
-    representation_plan: Any = None,
 ) -> None:
     """Validate the narrow icon-crop contract used by this reconstruction skill."""
     if not isinstance(module, dict):
@@ -1091,44 +1078,6 @@ def _validate_icons(
     if module.get("clean_visual_sha256") != expected_reference_hash:
         _error(errors, "SPEC_ICONS_REFERENCE_INVALID", "modules.icons.clean_visual_sha256", "must match clean_visual_reference.sha256")
 
-    families = module.get("families")
-    family_records: dict[str, dict[str, Any]] = {}
-    if not isinstance(families, list) or not families:
-        _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", "modules.icons.families", "families must be a non-empty array")
-        families = []
-    for index, family in enumerate(families):
-        path = f"modules.icons.families[{index}]"
-        if not isinstance(family, dict):
-            _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", path, "family must be an object")
-            continue
-        unknown = sorted(set(family) - ICON_FAMILY_FIELDS)
-        missing = sorted(ICON_FAMILY_FIELDS - set(family))
-        if unknown or missing:
-            detail = (
-                f"unknown fields: {', '.join(unknown)}"
-                if unknown
-                else f"missing fields: {', '.join(missing)}"
-            )
-            _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", path, detail)
-            continue
-        family_id = family.get("family_id")
-        members = family.get("member_fact_ids")
-        if (
-            not isinstance(family_id, str)
-            or not family_id
-            or family_id in family_records
-            or not isinstance(family.get("expected_count"), int)
-            or family["expected_count"] <= 0
-            or not isinstance(members, list)
-            or not members
-            or not all(isinstance(value, str) and value for value in members)
-            or len(members) != len(set(members))
-            or family.get("required_render_mode") != "picture_asset"
-        ):
-            _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", path, "family identity, members, count, and picture_asset policy must be complete")
-            continue
-        family_records[family_id] = family
-
     icons = module.get("icons")
     if not isinstance(icons, list) or not icons:
         _error(errors, "SPEC_ICONS_ITEMS_INVALID", "modules.icons.icons", "icons must be a non-empty array")
@@ -1137,8 +1086,6 @@ def _validate_icons(
     icon_element_ids = {element_id for element_id, element in element_map.items() if element.get("kind") == "icon"}
     seen_icon_ids: set[str] = set()
     seen_element_ids: set[str] = set()
-    family_fact_ids: dict[str, list[str]] = {}
-    family_slots: dict[str, set[str]] = {}
     required_item = ICON_ITEM_FIELDS
     visual_size = canvas.get("visual_size") if isinstance(canvas, dict) else None
     for index, item in enumerate(icons):
@@ -1166,22 +1113,6 @@ def _validate_icons(
             _error(errors, "SPEC_ICON_ID_INVALID", f"{path}.icon_id", "icon_id must be unique and non-empty")
         else:
             seen_icon_ids.add(icon_id)
-        source_fact_id = item.get("source_fact_id")
-        family_id = item.get("family_id")
-        slot_id = item.get("slot_id")
-        if not isinstance(source_fact_id, str) or not source_fact_id:
-            _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", f"{path}.source_fact_id", "source_fact_id must be non-empty")
-        if not isinstance(family_id, str) or family_id not in family_records:
-            _error(errors, "SPEC_ICON_FAMILY_INCOMPLETE", f"{path}.family_id", "family_id must reference a declared family")
-        elif isinstance(source_fact_id, str) and source_fact_id:
-            family_fact_ids.setdefault(family_id, []).append(source_fact_id)
-        if not isinstance(slot_id, str) or not slot_id:
-            _error(errors, "SPEC_ICON_SLOT_INVALID", f"{path}.slot_id", "slot_id must be non-empty")
-        elif isinstance(family_id, str):
-            slots = family_slots.setdefault(family_id, set())
-            if slot_id in slots:
-                _error(errors, "SPEC_ICON_SLOT_INVALID", f"{path}.slot_id", "slot_id must be unique within its family")
-            slots.add(slot_id)
         element_id = item.get("element_id")
         if not isinstance(element_id, str) or element_id not in icon_element_ids:
             _error(errors, "SPEC_ICON_ELEMENT_REFERENCE_INVALID", f"{path}.element_id", "must reference an icon element")
@@ -1216,8 +1147,8 @@ def _validate_icons(
             _error(errors, "SPEC_ICON_LAYER_INVALID", f"{path}.layer", "must be a positive integer")
 
         padding = item.get("padding")
-        if padding != 0:
-            _error(errors, "SPEC_ICON_PADDING_INVALID", f"{path}.padding", "icon source crops require padding=0")
+        if not isinstance(padding, int) or padding < 0:
+            _error(errors, "SPEC_ICON_PADDING_INVALID", f"{path}.padding", "must be a non-negative integer")
         elif _valid_bbox(source_bbox) and _valid_size(visual_size):
             crop_bounds = [source_bbox[0] - padding, source_bbox[1] - padding, source_bbox[2] + padding * 2, source_bbox[3] + padding * 2]
             if not _bbox_in_bounds(crop_bounds, visual_size):
@@ -1365,55 +1296,6 @@ def _validate_icons(
     if missing_elements:
         _error(errors, "SPEC_ICON_ELEMENT_MISSING", "modules.icons.icons", f"missing icon records: {', '.join(missing_elements)}")
 
-    plan_items = (
-        representation_plan.get("items")
-        if isinstance(representation_plan, dict)
-        else None
-    )
-    plan_by_fact = {
-        item.get("source_fact_id"): item
-        for item in (plan_items if isinstance(plan_items, list) else [])
-        if isinstance(item, dict) and isinstance(item.get("source_fact_id"), str)
-    }
-    for family_id, family in family_records.items():
-        declared = family.get("member_fact_ids", [])
-        actual = family_fact_ids.get(family_id, [])
-        if (
-            len(actual) != family.get("expected_count")
-            or set(actual) != set(declared)
-            or len(actual) != len(set(actual))
-        ):
-            _error(
-                errors,
-                "SPEC_ICON_FAMILY_INCOMPLETE",
-                f"modules.icons.families.{family_id}",
-                "declared members and expected_count must exactly match icon records",
-            )
-        for fact_id in actual:
-            plan_item = plan_by_fact.get(fact_id)
-            if not isinstance(plan_item, dict):
-                _error(
-                    errors,
-                    "SPEC_ICON_FAMILY_INCOMPLETE",
-                    f"modules.icons.families.{family_id}",
-                    f"representation fact is missing: {fact_id}",
-                )
-                continue
-            if plan_item.get("visual_role") not in {"icon", "pictogram", "logo"}:
-                _error(
-                    errors,
-                    "SPEC_ICON_ROLE_MODE_CONFLICT",
-                    f"modules.representation_plan.{fact_id}.visual_role",
-                    "icon family facts require icon, pictogram, or logo visual_role",
-                )
-            if plan_item.get("render_mode") != "picture_asset":
-                _error(
-                    errors,
-                    "SPEC_ICON_FAMILY_MODE_MISMATCH",
-                    f"modules.representation_plan.{fact_id}.render_mode",
-                    "every member of an icon family must use picture_asset",
-                )
-
 
 def _identity_only_final(
     spec: dict[str, Any],
@@ -1534,8 +1416,8 @@ def validate_spec(
     font_runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a stable validation report for a reconstruction specification."""
-    if stage not in {"prebuild", "draft", "final"}:
-        raise ValueError("stage must be prebuild, draft, or final")
+    if stage not in {"prebuild", "final"}:
+        raise ValueError("stage must be prebuild or final")
     non_finite_paths = non_finite_number_paths(spec)
     if non_finite_paths:
         declared_profile = (
@@ -1598,12 +1480,7 @@ def validate_spec(
         }
     for path, detail in envelope_issues:
         _error(errors, "UNSUPPORTED_CAPABILITY", path, detail)
-    _validate_verification_identity(
-        spec,
-        verification_profile,
-        errors,
-        stage=stage,
-    )
+    _validate_verification_identity(spec, verification_profile, errors)
 
     if spec.get("schema_version") != 2:
         _error(errors, "SPEC_SCHEMA_VERSION_UNSUPPORTED", "schema_version", "expected schema_version 2")
@@ -1838,7 +1715,6 @@ def validate_spec(
             spec.get("page_id"),
             stage,
             errors,
-            representation_plan=modules.get("representation_plan"),
         )
 
     if stage == "prebuild" and not errors:
@@ -1864,19 +1740,6 @@ def validate_spec(
                 typography_index,
             )
         )
-
-    if stage == "draft":
-        draft_summary, draft_errors = draft_delivery_summary(spec)
-        errors.extend(draft_errors)
-        return {
-            "valid": not errors,
-            "stage": stage,
-            "verification_profile": verification_profile,
-            "spec_sha256": spec_sha256,
-            "errors": errors,
-            "warnings": warnings,
-            **draft_summary,
-        }
 
     if stage == "final":
         final_summary = _identity_only_final(
@@ -1917,8 +1780,8 @@ def validate_spec_file(
     """Validate one exact JSON byte stream and optionally freeze it for build."""
     if snapshot_path is not None and stage != "prebuild":
         raise ValueError("--snapshot is only valid with --stage prebuild")
-    if stage in {"draft", "final"} and runtime_path is not None:
-        raise ValueError("--runtime is accepted only with --stage prebuild")
+    if stage == "final" and runtime_path is not None:
+        raise ValueError("--runtime is not accepted with --stage final")
     runtime: dict[str, Any] | None = None
     runtime_identity: dict[str, str] | None = None
     if runtime_path is not None:
@@ -1963,7 +1826,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("spec", type=Path, help="Path to page-reconstruction.json")
     parser.add_argument(
         "--stage",
-        choices=("prebuild", "draft", "final"),
+        choices=("prebuild", "final"),
         default="prebuild",
     )
     parser.add_argument(
@@ -1986,8 +1849,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--snapshot is only valid with --stage prebuild")
     if args.snapshot is not None and args.output is None:
         parser.error("--snapshot requires --output")
-    if args.stage in {"draft", "final"} and args.runtime is not None:
-        parser.error("--runtime is accepted only with --stage prebuild")
+    if args.stage == "final" and args.runtime is not None:
+        parser.error("--runtime is not accepted with --stage final")
     return args
 
 

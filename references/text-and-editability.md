@@ -1,59 +1,60 @@
 # 文字与可编辑性
 
-本文件只定义 schema v2 的文字合同、固定 TextBox 容量、字体和最低可编辑性；流程状态由 profile reference 负责。
+## 来源文本容器
 
-## 文字合同
+内容逐字服从 `content_reference`。一个来源容器对应一个 `TextBox/TextFrame`；不按视觉行拆框，自动折行不写硬回车。`paragraphs[]`/`paragraph_breaks[]` 已表达边界时，`text` 禁用 CR/LF 重复表达；保留真实 Paragraph。
 
-每个来源 TextBox 对应一个 `kind=text` element 和一个 `modules.typography.items[]`。Typography item 必须完整写：
+`modules.typography.items[]` 用唯一 `element_id` 绑定文字，保存 text、runs、paragraphs、TextBox 与字体声明；每项只有一个 `selected_font`，runs/paragraphs 连续覆盖全文，坐标用 EMU。生成前不写最终 OOXML ID。
 
-`element_id/text/source_font_guess/selected_font/fallback_reason/fallback_trace/runs/paragraphs/text_box/internal_font_declaration/font_declaration_verified`。
+所有 `kind=text` 对象只交给统一 Text renderer；不得另写页面级 TextBox 生成函数。renderer 从 typography 索引取得 Text Run、段落、边距、对齐、wrap 与 overflow，规格缺项或绑定冲突即 fail closed。
 
-来源存在两行以上可见文字或垂直对齐不是 `top` 时，再写 `source_layout`。element 的 `content.text`、typography 的 `text` 和 OOXML 可见文本必须完全一致；`text_box.x/y/w/h` 与 element `slide_bbox` 一致。
+## 文字转录与 spans 编写
 
-### 作者期复合 TextBox helper
+先确认完整文字、真实 Paragraph 和标点，再处理颜色、字重与局部字号。一个来源 TextBox 对应一次 `add_text()`；自动换行不拆字符串，只有真实 Paragraph 才使用 `list[str]`。数字、百分号、单位、正负号、括号、空格和中英文标点逐字服从来源；模糊字符先检查图片局部，不根据上下文补造。
 
-来源 TextBox 是 `scripts/lib/textbox_authoring.py::compile_textbox()` 的输入原子。一次 helper 调用生成一个 `kind=text` element 和一个 `modules.typography.items[]`，直接组装 schema v2 的 `text/runs/paragraphs/list/source_layout/text_box`。单行单段文字是同一 helper 的特例，不是另一条简化文字路径。
-
-页面脚本按固定顺序处理一个来源 TextBox：
-
-1. 一次转录框内完整 `text`，不按可见行创建多个 element。
-2. 用连续 `runs[]` 保留框内多色、字重、字号和局部样式。
-3. 用一个或多个 `paragraphs[]` 保留真实段落；同源列表的每项在该 TextBox 内使用原生 list Paragraph。
-4. 多行可见文字用 `source_layout` 记录行中心距和文字块中心偏移。
-5. 锁定内容结构后再应用 `text_safety`；安全处理只改整个 TextBox 的 source bbox、margin 与容量，不改变 element 数、Run 区间、Paragraph 边界或 bullet 类型。
-
-作者期使用 `paragraphs_text` 一次提供完整单段字符串或真实 Paragraph 字符串列表；这些字符串直接拼成 schema `text`，Paragraph 边界直接编译到 `paragraphs[]` 与 `text_box.paragraph_breaks`，不在文本中重复写 CR/LF。`spans` 只写相对主体样式的真实差异：优先使用唯一 `text`，重复文本必须增加从 1 开始的 `occurrence` 或显式 `[start,end)`；定位不唯一时 helper 失败关闭。helper 会补齐主体样式区间、按边界切分并合并相邻同样式 Run，因此输出始终连续覆盖全文。
-
-页面脚本先按本文件“固定框安全区”算出最终 `source_bbox/slide_bbox/margins`，再调用 helper。`vertical_alignment` 与 `text_safety` 都是无默认值的 keyword-only 参数；`text_safety` 只验证调用点已经显式分类，不序列化。返回的两个 dict 直接放入 `elements[]` 与 `modules.typography.items[]`，禁止把 `paragraphs_text/spans/text_safety` 写入规格。
+把框内占比最大的样式作为 `add_text()` 默认值；单一样式 TextBox 不写 `spans`。`spans` 只写差异，按以下顺序定位：唯一文本；多个唯一值使用列表推导式；重复短文本用更长上下文计算显式 `start/end`；只有上下文也无法区分时才使用 `occurrence`。
 
 ```python
-element, typography = compile_textbox(
-    element_id="kpi", paragraphs_text=["收入 25%", "同比提升"],
-    spans=[{"text": "25%", "font_weight": 700, "color": "#E46C0A"}],
-    paragraphs=paragraph_contracts,
-    source_bbox=final_source_bbox, slide_bbox=map_bbox(final_source_bbox), layer=3,
-    selected_font=PREFERRED_FONT, source_font_guess="unknown",
-    fallback_reason="source_font_uncertain", fallback_trace=None,
-    font_declaration_verified=False, base_run_style=base_run_style,
-    margins=final_margins, alignment="left", wrap=True, overflow=False,
-    vertical_alignment="middle", text_safety="container_bound",
-    source_layout=source_layout,
-)
+spans = [
+    {"text": "过保替换：", "font_weight": 700},
+    *[{"text": value, "color": ORANGE} for value in ("9,312", "4,497", "847", "428")],
+]
 ```
 
-### Text Run
+```python
+start = text.index("0故障")
+spans = [{"start": start, "end": start + 1, "color": ORANGE}]
+```
 
-`runs[]` 使用 `[start,end)` 索引并无重叠、无缺口地覆盖完整 `text`。每个 run 必须写 `start/end/font_size/font_weight/color/letter_spacing/italic/underline/strike/baseline`。多色标题、粗体数字和局部样式差异都在同一 TextBox 的连续 run 中表达，不得拆框。
+不得手工展开完整 `runs[]`，不得使用正则或“所有数字”等内容类别批量推断样式，也不得通过拆框或硬换行规避 Text Run、Paragraph 或排版问题。
 
-`validate_pptx.py --spec` 按语义区间核对样式；物理 Run 的合并或拆分不改变结果。字号与字距归一到百分之一磅，颜色为大写 `#RRGGBB`，字重按 bold 归一。样式偏差写 `TEXT_RUN_STYLE_MISMATCH` warning；文本缺失、TextBox 歧义、run 重叠/缺口或覆盖不完整仍失败关闭。
+## 固定文本框的字形安全区
 
-### Paragraph 与列表
+普通视图中部分文字被裁切、仅在鼠标悬停或双击编辑态显示完整时，文字内容和 Text Run 仍然存在；按固定 TextBox 容量不足处理，不拆框、不补字、不图片化。首次构建前必须预防可判断的裁切：以框内最大 Text Run 字号为 `1em`；来源可见字形到任一水平可用边界小于 `0.5em` 时判为高风险，优先检查 `wrap=false` 的多 Text Run、粗体和长单行文字。不得把无可见边框的 TextBox 收紧到字形边界。
 
-`paragraphs[]` 每段写 `start/end/alignment/line_spacing/space_before/space_after/indent/list`；原生列表还写 `margin_left`。自动折行不拆 Paragraph，真实段落才拆；`text_box.paragraph_breaks` 等于前面各段的 end，`soft_breaks` 只记录真实软换行。
+### 首次最小安全扩框
 
-一个 Paragraph 自动折成多行时保持连续 `text`、`wrap=true` 且不写 `soft_breaks`，只用该段 `line_spacing` 控制行距。两个独立段落必须是两个 `paragraphs[]`；段间距只由相邻一侧的 `space_after` 或 `space_before` 承担，另一侧保持 0，禁止用空段、硬回车或扩大段内行距模拟段距。
+只处理无填充、无边框、`wrap=false` 且左右均有已确认空白的高风险 TextBox。首次固定使用 `p=0.5em`：`p_pt=max_run_font_size_pt×0.5`、`p_source_px=p_pt/scale_pt_per_source_px`、`p_emu=p_pt×12700`；复用页面既有 mapping，不使用固定 DPI，不运行测字、碰撞搜索或额外 preview。设来源 TextBox 为 `x,w`，先在 source 坐标执行 `x'=x-p_source_px`、`w'=w+2p_source_px`，再由既有 mapping 生成 element `slide_bbox`；typography 边距 `ml,mr` 使用 EMU，并按 alignment 保持视觉锚点：
 
-视觉上有两行以上，或 TextBox 垂直对齐不是 `top` 时，必须写来源测量目标：
+| alignment | `margin_left'` | `margin_right'` | 保持不变的锚点 |
+|---|---:|---:|---|
+| `left` | `ml+p_emu` | `mr` | slide `x'+margin_left'=x+ml` |
+| `center` | `ml` | `mr` | 可用文本区中心不变 |
+| `right` | `ml` | `mr+p_emu` | slide `x'+w'-margin_right'=x+w-mr` |
+
+左对齐不得同时增加 `margin_right`，右对齐不得同时增加 `margin_left`；对所有 alignment 同时补偿左右 margin 会把新增可用宽度抵消，只得到更大的外框，不能解决末字裁切。element `source_bbox` 必须写扩展后的 source 框，`kind=text` element 的 `slide_bbox` 必须由该框按 canvas mapping 生成并与 typography `text_box` 完全同步；原始字形/来源测量框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID`。扩框只进入已确认空白，不改 y/h、字号、字体、字距、Paragraph、Text Run、换行或垂直对齐。
+
+页面边界、表格单元格、矩阵格子、卡片标签及其他受限容器不能提供完整 `0.5em` 空白时，不盲目执行上述首次扩框，也不得越过来源容器。首次 preview 只在普通视图验证残余首尾裁切、错误换行和扩框重叠；悬停或双击后显示完整不能算通过。若仍有裁切，把全部文字问题合入唯一一次集中修复：外侧仍有空白时沿用同一锚点公式把目标框安全区提高到最多 `1.0em`；受限容器内先调整 box 与 margin，来源本来允许自动换行时才调整 wrap。
+
+缩小字号不是裁切的默认修复。只有固定框受硬边界约束、box/margin/wrap 均不能在不破坏来源布局的前提下容纳文字，并且生成字形确实比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组；不得逐框“减 1pt”试排。若字号与来源一致而只是首尾裁切，继续修 box/margin，不以缩字掩盖容量不足。
+
+统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。只有固定框无法在不破坏来源布局的前提下容纳文字、且用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit；这不属于当前页面的 preview 后补丁。
+
+## 行距、段距与框内垂直位置
+
+先按来源语义确定 Paragraph，再调框内排版。一个 Paragraph 自动折成多行时保持连续 text、`wrap=true` 且不写 `soft_breaks`，只用该段 `line_spacing` 控制行距；两个独立段落必须是两个 `paragraphs[]`，段间距只由相邻一侧的 `space_after` 或 `space_before` 承担，另一侧为 0，禁止用空段、硬回车或扩大段内行距模拟段距。
+
+`line_spacing` 沿用 schema v2 的现有比例值，不新增固定磅值模式或平行字段。视觉上包含两行及以上，或来源不是顶部对齐时，该 typography item 必须增加：
 
 ```json
 "source_layout": {
@@ -62,60 +63,33 @@ element, typography = compile_textbox(
 }
 ```
 
-数组按可见行从上到下记录相邻行中心距；空数组表示单行。中心偏移为可见文字块中心减 TextBox 中心，正值向下。`source_layout` 只保存来源目标，不替代 Paragraph、`vertical_alignment` 或 margins。修正顺序为：先锁定 Paragraph 与换行，再校准字号和 box/margin/wrap，随后调字距、`line_spacing`、相邻一侧段距，最后校准文字块纵向中心；不得通过拆框、硬换行或空段掩盖误差。
+数组按可见行从上到下记录相邻行中心距；空数组表示单行。中心偏移是可见文字块中心减 TextBox 中心，正值向下。它只保存来源测量目标，不替代 `paragraphs[]`、`text_box.vertical_alignment` 或 margins。
 
-同源列表只用一个 TextBox，每项一个原生 Paragraph。`list` 使用 `buChar|buAutoNum|buBlip` 对应的 `bullet_type/bullet`，保存 level、字体、字号模式、颜色及 EMU margin/indent。图片 bullet 的 `bullet_asset` 必须为绝对本地 PNG/JPEG，绑定 SHA-256 与像素尺寸；同素材复用一个 media part。素材或 relationship 异常时失败关闭，禁止降级为字符 bullet 或独立 Picture。
+`text_box.vertical_alignment` 必须服从来源的 `top|middle|bottom`，不得统一设为 `middle`。来源居中时写 `middle` 并保留实测上下 margins；来源上下留白对称时 margins 也对称。统一 renderer 已固定 `MSO_AUTO_SIZE.NONE`，规格不得新增 `autoFit/auto_size` 字段，也不得通过收缩框高、移动 y、插入空行或缩小字号伪造居中。
 
-`follow_text` 分别映射 `bullet_font→buFontTx`、`bullet_size_mode→buSzTx`、`bullet_color→buClrTx`。列表规范化由 compiler 发布事务完成，Skill 不得另跑后处理。
+页面文字辅助函数必须把 `vertical`/`valign` 声明为必填 keyword-only 参数，不得为 `top|middle|bottom` 设置默认值；每个调用点必须根据来源显式传入垂直对齐。该规则只防止遗漏选择，不改变来源本来就是顶部或底部对齐的 TextBox。
 
-### TextBox
+## Text Run 与原生列表
 
-`text_box` 必须写 `x/y/w/h/margins/alignment/vertical_alignment/wrap/overflow/soft_breaks/paragraph_breaks`。文字 helper 必须把 `vertical_alignment` 与 `text_safety` 声明为无默认值的必填 keyword-only 参数；每个调用点按来源显式选择，且不得为 `top|middle|bottom` 设置默认值。`text_safety` 只允许 `free_text|container_bound`，其几何计算只发生在 `prepare_spec.py`；共享 helper 只验证显式选择并接收安全处理后的 bbox/margin，不写入 schema。Paragraph alignment 与 text_box alignment 必须保持一致。
+字体、字号、字重、颜色、斜体、下划线、删除线、上下标和局部字号变化精确到 Text Run；标题、标签和强调范围不得退化为整框样式，Paragraph 与 Run 不互相替代。
 
-统一 renderer 固定 `MSO_AUTO_SIZE.NONE`。不得新增 `autoFit/auto_size`、写入 `a:spAutoFit`，或通过收缩框高、移动 y、插入空行和过度缩字伪造居中。
+`validate_pptx.py --spec` 按 `element_id` 和 `[start,end)` 语义区间核对 `font_size`、`font_weight`、`color`、`italic`、`underline`、`strike`、`baseline`、`letter_spacing`；物理 Run 的合并或拆分不改变结果。字号与字距统一到百分之一磅、颜色统一为大写 `#RRGGBB`、字重统一为是否 bold。样式偏差写入 `TEXT_RUN_STYLE_MISMATCH` 结构化 warning，不改变 `valid`；TextBox 缺失/歧义、文本不一致以及 Run 重叠、缺口或覆盖不完整仍 fail closed。warning 严重度不随 profile 改变。
 
-## 首次构建的固定框安全区
+同源列表只用一个 TextBox，每项一个原生 Paragraph；bullet 只用 `buChar`、`buAutoNum` 或 `buBlip`。每段保存身份、层级、样式及 EMU `margin_left/indent`，最终由 `validate_pptx.py --spec` 核对。
 
-首次构建不得把可预防的文字裁切留到 preview。普通视图裁切、仅悬停或双击编辑态显示完整，仍是固定 TextBox 容量不足，不能判通过。
+图片项目符号使用 `bullet_type=picture`、`bullet=blip` 和 `bullet_asset`；素材必须是绝对路径的本地 PNG/JPEG，并携带精确的 SHA-256 与像素尺寸。同一 TextBox 的多个 Paragraph 共用相同素材时，compiler 写入真实 `a:buBlip/a:blip@r:embed` 并按素材身份复用一个 media part。素材或 relationship 异常时 fail closed，禁止降级成字符 bullet 或独立 Picture；validator 同时核对内部 image relationship 与 media SHA-256。
 
-先按来源边界选择作者期分类：
+`follow_text`：`bullet_font`→`buFontTx`、`bullet_size_mode`→`buSzTx`、`bullet_color`→`buClrTx`；禁止固化为当前字体、字号或颜色快照。
 
-| `text_safety` | 适用对象 | 首次构建动作 |
-|---|---|---|
-| `free_text` | 无填充、无边框、`wrap=false`，且外侧存在已确认空白的标题、标签或说明 | 自动预留横向 `0.5em`；单行框不足 `1.15em` 时在已确认上下空白内扩高 |
-| `container_bound` | 卡片、表格、矩阵、节点或其他明确容器内文字 | 不越界扩框；先校正来源 bbox、字号 mapping、margin/wrap 与行段距，字号仅作最后兜底 |
-
-`free_text` 的横向安全量为：
-
-```text
-p_pt = max_run_font_size_pt × 0.5
-p_source_px = p_pt / scale_pt_per_source_px
-p_emu = p_pt × 12700
-```
-
-在 source 坐标先做 `x'=x-p_source_px`、`w'=w+2p_source_px`，再用既有 mapping 生成 slide bbox。为保持原文字锚点：left alignment 把 `p_emu` 加到 left margin，center 不补 margin，right alignment 把 `p_emu` 加到 right margin；不得靠改变文字对齐掩盖位移。`container_bound` 不使用这一扩框规则。
-
-对 `free_text` 的单行固定框计算：
-
-```text
-h_pt = h_source_px × scale_pt_per_source_px
-h_min_pt = max_run_font_size_pt × 1.15
-d_source_px = max(0, h_min_pt - h_pt) / scale_pt_per_source_px
-```
-
-只有上下存在已确认空白时才扩高：`top` 固定顶边，`middle` 将 y 上移 `d_source_px/2`，`bottom` 将 y 上移 `d_source_px`，同时把 h 增加 `d_source_px`。这是保持垂直锚点的 bbox 补偿；禁止只移动 y 代替增加容量。`container_bound` 无法扩高时，先校正来源字号和段落参数，最后才做最小字号修正。
-
-发现首尾裁切时，先检查 box → margin/wrap；外侧仍有空白时最多提高到 `1.0em`。受限容器没有空间时，字号才是最后兜底。不得硬换行、拆框、改写或图片化掩盖问题。
-
-页面脚本的 `text_safety` 分支只做上述确定性几何处理。不得新增字体文件探测、glyph 宽度测量、候选字体试排、自动字号搜索或文字占用率交付门禁；这些近似计算不能替代 PowerPoint 实际渲染。若 `free_text` 未执行适用的安全区、单行框低于 `1.15em`，或 `container_bound` 越界，只记录并优先修正该文字框，不新增 schema 字段、第二套 IR 或字体测量脚本。
+原生列表的 `buFontTx/buSzTx/buClrTx` 规范化由 compiler 发布事务内部完成；Skill 不得在 compiler 前后另跑列表规范化或继续使用未规范化 PPTX。
 
 ## 字体与字号
 
-每页第一项 `selected_font` 是 `preferred_font`。同页 `selected_font`、`internal_font_declaration`、非空且非 `follow_text` 的 bullet/font 声明必须一致；compiler 写入 `a:latin/a:ea/a:cs/a:sym`，不依赖主题字体。
+`rapid` 与 `reviewed` 都把字体视为构建意图，而不是运行时门禁。每页第一项 typography 的 `selected_font` 是 `preferred_font`；同页每个 `selected_font`、`internal_font_declaration`、非空且非 `follow_text` 的 `bullet_font`，以及 element 中的 `font_name/font.name` 都必须与它一致。`source_font_guess` 只记录源图观感，来源不确定时可写 `fallback_reason=source_font_uncertain`。
 
-`source_font_guess` 只记录观感，不确定时写 `fallback_reason=source_font_uncertain`。两种 profile 都不以字体文件、TTC face、fontconfig 或 `pdffonts` 作为构建门禁；字体 fallback 不回写规格、不换字、不触发重建，只有其造成的可见裁切、换行、溢出或层级差异才评级。
+compiler 必须把 `preferred_font` 显式写入一致的 `a:latin/a:ea/a:cs/a:sym`，不得依赖主题字体。两种模式都不检查字体文件、TTC face 或 fontconfig；LibreOffice/PowerPoint 的实际 fallback 不回写规格、不触发换字或第二次 build。可选预览中的 `pdffonts` 只生成 `matched/mismatches` 诊断；若 preview 已成功生成，`matched=false` 或 fallback 不使 preview 失效，也不阻止主代理视觉审查。字体 fallback 本身不是 P0/P1，只有导致可见裁切、错误换行、溢出或层级问题时，才按这些可见差异评级。
 
-字号单位为 pt，文本坐标为 EMU。初值使用页面实际 mapping：
+`runs[].font_size` 固定使用 point（pt），文本坐标使用 EMU；自定义字号字段以 `_font_size_pt` 结尾。初值按页面实际比例估算，不使用固定 96 DPI：
 
 ```text
 scale_pt_per_source_px =
@@ -123,10 +97,14 @@ scale_pt_per_source_px =
       slide_height_emu / 12700 / page_frame_height_px)
 ```
 
-比例只映射物理长度，不把 glyph 高度或 OCR 紧框高度当字体 em。`prepare_spec.py` 必须先计算一次当前页面的 `scale_pt_per_source_px`，所有初始字号、框高和行段距都以该 mapping 为依据；不得先凭 glyph 高度硬编码 pt 再用扩框掩盖。按根因依次调整字号、box、margin/wrap、字距、行/段距和垂直对齐；先锁定换行，再校准行中心距和文字块纵向中心。不做候选字体试排、自动字号搜索或阶段性换字。
+比例只映射物理长度，不把 glyph 高度当作字体 em。先确认页面映射、`preferred_font`、显式 margin 和关闭 AutoFit，再按来源估计字号。可选预览无明显字号、换行或溢出差异时继续；有系统性差异时，从标题、正文、数字/KPI、列表/表格等实际存在组别各选一个代表性高风险 TextBox，以 `new_font_pt = current_font_pt × target_glyph_px / current_glyph_px` 修正同一规格，目标框及相邻边界改善后应用于同组。不逐框试排，不做自动字号搜索，不新增字体优化状态机。
+
+不做字体比较、候选字体试排或阶段性换字。特殊字符、生僻字、公式、多语言或缺字只能触发局部内容调查，不能在渲染后修改 `preferred_font`。
+
+调整顺序由根因决定：同一语义组的生成字形系统性大于来源时先校准字号；字号与来源一致而首尾裁切时按 box → margin/wrap 处理；受限容器没有扩框空间时，字号才是最后兜底。随后才调整字距 → 行/段距 → 垂直对齐；先锁定换行位置，再校准相邻行中心距，最后校准文字块纵向中心。自动折行只改 `line_spacing`，真实段落优先改相邻一侧的 `space_after/space_before`。不用硬换行、拆框、过度缩字、改写或图片化掩盖问题。若生成了预览，把 source/preview 中全部可见文字问题合入一次修复批次；修正后重跑 build、structure、background，并至多再生成一次预览。字体 fallback 只披露，不修复。`validate_pptx.py --spec` 继续核对 OOXML Text Run 字号与规格 point 值。
 
 ## 特殊文本与最低可编辑性
 
-特殊文字仍以 `kind=text` 构建，并在 `modules.special_text` 记录额外语义。rotation 在 prebuild 前规范到 `[0,360)`。只有确实无法原生还原且不属于主要文字时，才图片化最小字形。
+特殊文本写入 `modules.special_text`，优先原生。新任务 element rotation 在 prebuild 前规范到 `[0,360)`，如 `-25→335`；legacy final 可兼容负角。确实无法原生还原时才图片化最小字形。
 
-主要文字、数字、表格数据和基础结构必须可独立选择。复杂图形中的主要标签不能无损分离时，按所需可编辑性失败关闭；不得在含原文字的 picture 上再覆盖一份可编辑文字。
+文字、数字、表格数据和基础结构须可独立选择；照片与复杂装饰只覆盖最小范围。最终检查选择粒度、Text Run、Paragraph、bullet 和图片化风险。
