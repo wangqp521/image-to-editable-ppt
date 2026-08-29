@@ -46,6 +46,8 @@ from lib.schema_contracts import (
     ELEMENT_FIELDS,
     ICON_ITEM_FIELDS,
     ICON_MODULE_FIELDS,
+    LOCAL_PICTURE_ITEM_FIELDS,
+    PICTURE_FRAMING_MODULE_FIELDS,
     schema_envelope_issues,
     unknown_field_detail,
 )
@@ -1297,6 +1299,218 @@ def _validate_icons(
         _error(errors, "SPEC_ICON_ELEMENT_MISSING", "modules.icons.icons", f"missing icon records: {', '.join(missing_elements)}")
 
 
+def _validate_picture_framing(
+    module: Any,
+    element_map: dict[str, dict[str, Any]],
+    canvas: Any,
+    clean_visual_reference: Any,
+    page_id: Any,
+    stage: str,
+    errors: list[dict[str, str]],
+) -> None:
+    """Validate seeded transparent assets for non-icon complex decorations."""
+    module_path = "modules.picture_framing"
+    if not isinstance(module, dict):
+        _error(errors, "SPEC_MODULE_INVALID", module_path, "module must be an object")
+        return
+    module_unknown = unknown_field_detail("PictureFramingModule", module)
+    if module_unknown is not None:
+        _error(errors, "UNSUPPORTED_CAPABILITY", module_path, module_unknown)
+        return
+    missing_module = sorted(PICTURE_FRAMING_MODULE_FIELDS - set(module))
+    if missing_module:
+        _error(
+            errors,
+            "SPEC_LOCAL_PICTURE_FIELD_MISSING",
+            module_path,
+            f"missing fields: {', '.join(missing_module)}",
+        )
+        return
+    if module.get("schema_version") != 2:
+        _error(errors, "SPEC_LOCAL_PICTURE_SCHEMA_VERSION_INVALID", f"{module_path}.schema_version", "expected schema_version 2")
+    if module.get("page_id") != page_id:
+        _error(errors, "SPEC_LOCAL_PICTURE_PAGE_ID_INVALID", f"{module_path}.page_id", "must match page_id")
+    if module.get("slide_coordinate_unit") != "EMU":
+        _error(errors, "SPEC_LOCAL_PICTURE_UNIT_INVALID", f"{module_path}.slide_coordinate_unit", "picture slide coordinates must use EMU")
+
+    expected_reference_path = clean_visual_reference.get("path") if isinstance(clean_visual_reference, dict) else None
+    expected_reference_hash = clean_visual_reference.get("sha256") if isinstance(clean_visual_reference, dict) else None
+    if module.get("clean_visual_reference") != expected_reference_path:
+        _error(errors, "SPEC_LOCAL_PICTURE_REFERENCE_INVALID", f"{module_path}.clean_visual_reference", "must match clean_visual_reference.path")
+    if module.get("clean_visual_sha256") != expected_reference_hash:
+        _error(errors, "SPEC_LOCAL_PICTURE_REFERENCE_INVALID", f"{module_path}.clean_visual_sha256", "must match clean_visual_reference.sha256")
+
+    pictures = module.get("pictures")
+    if not isinstance(pictures, list) or not pictures:
+        _error(errors, "SPEC_LOCAL_PICTURE_ITEMS_INVALID", f"{module_path}.pictures", "pictures must be a non-empty array")
+        return
+
+    visual_size = canvas.get("visual_size") if isinstance(canvas, dict) else None
+    seen_picture_ids: set[str] = set()
+    seen_element_ids: set[str] = set()
+    for index, item in enumerate(pictures):
+        path = f"{module_path}.pictures[{index}]"
+        if not isinstance(item, dict):
+            _error(errors, "SPEC_LOCAL_PICTURE_ITEM_INVALID", path, "picture record must be an object")
+            continue
+        item_unknown = unknown_field_detail("LocalPictureItem", item)
+        if item_unknown is not None:
+            _error(errors, "UNSUPPORTED_CAPABILITY", path, item_unknown)
+            continue
+        missing_item = sorted(LOCAL_PICTURE_ITEM_FIELDS - set(item))
+        if missing_item:
+            _error(errors, "SPEC_LOCAL_PICTURE_FIELD_MISSING", path, f"missing fields: {', '.join(missing_item)}")
+            continue
+
+        picture_id = item.get("picture_id")
+        if not isinstance(picture_id, str) or not picture_id or picture_id in seen_picture_ids:
+            _error(errors, "SPEC_LOCAL_PICTURE_ID_INVALID", f"{path}.picture_id", "picture_id must be unique and non-empty")
+        else:
+            seen_picture_ids.add(picture_id)
+        element_id = item.get("element_id")
+        element = element_map.get(element_id) if isinstance(element_id, str) else None
+        if not isinstance(element, dict) or element.get("kind") != "picture":
+            _error(errors, "SPEC_LOCAL_PICTURE_ELEMENT_REFERENCE_INVALID", f"{path}.element_id", "must reference a picture element")
+        elif element_id in seen_element_ids:
+            _error(errors, "SPEC_LOCAL_PICTURE_ELEMENT_DUPLICATE", f"{path}.element_id", "picture element may appear once")
+        else:
+            seen_element_ids.add(element_id)
+
+        if not isinstance(item.get("semantic_role"), str) or not item["semantic_role"]:
+            _error(errors, "SPEC_LOCAL_PICTURE_ROLE_INVALID", f"{path}.semantic_role", "must be non-empty")
+        source_bbox = item.get("source_bbox")
+        slide_bbox = item.get("slide_bbox")
+        if not _valid_bbox(source_bbox) or not _valid_bbox(slide_bbox):
+            _error(errors, "SPEC_LOCAL_PICTURE_BBOX_INVALID", path, "source_bbox and slide_bbox must be valid")
+        else:
+            if not _bbox_in_bounds(source_bbox, visual_size):
+                _error(errors, "SPEC_LOCAL_PICTURE_BBOX_OUT_OF_BOUNDS", f"{path}.source_bbox", "source bbox exceeds visual canvas")
+            if isinstance(element, dict):
+                if source_bbox != element.get("source_bbox") or slide_bbox != element.get("slide_bbox"):
+                    _error(errors, "SPEC_LOCAL_PICTURE_ELEMENT_MAPPING_INVALID", path, "picture bboxes must match the referenced element")
+                if item.get("layer") != element.get("layer"):
+                    _error(errors, "SPEC_LOCAL_PICTURE_ELEMENT_MAPPING_INVALID", f"{path}.layer", "layer must match the referenced element")
+        if not isinstance(item.get("layer"), int) or isinstance(item.get("layer"), bool) or item["layer"] <= 0:
+            _error(errors, "SPEC_LOCAL_PICTURE_LAYER_INVALID", f"{path}.layer", "must be a positive integer")
+
+        if item.get("source_path") != expected_reference_path or item.get("source_sha256") != expected_reference_hash:
+            _error(errors, "SPEC_LOCAL_PICTURE_SOURCE_BINDING_INVALID", path, "source must exactly bind to clean_visual_reference")
+        source_path = Path(item["source_path"]).expanduser() if isinstance(item.get("source_path"), str) else None
+        if source_path is None or not source_path.is_absolute() or source_path.is_symlink() or not source_path.is_file():
+            _error(errors, "SPEC_LOCAL_PICTURE_SOURCE_INVALID", f"{path}.source_path", "source must be a readable non-symlink file")
+        elif isinstance(item.get("source_sha256"), str) and SHA256_PATTERN.fullmatch(item["source_sha256"]):
+            if _file_sha256(source_path.resolve()).lower() != item["source_sha256"].lower():
+                _error(errors, "SPEC_LOCAL_PICTURE_SOURCE_HASH_MISMATCH", f"{path}.source_sha256", "source hash does not match current file")
+
+        if item.get("crop_mode") != "alpha_isolation_seeded":
+            _error(errors, "SPEC_LOCAL_PICTURE_CROP_MODE_INVALID", f"{path}.crop_mode", "must be alpha_isolation_seeded")
+        seeds = item.get("foreground_seeds")
+        valid_seeds = (
+            isinstance(seeds, list)
+            and bool(seeds)
+            and all(
+                isinstance(seed, list)
+                and len(seed) == 2
+                and all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in seed)
+                for seed in seeds
+            )
+        )
+        if not valid_seeds:
+            _error(errors, "SPEC_LOCAL_PICTURE_SEEDS_INVALID", f"{path}.foreground_seeds", "must contain one or more source-coordinate [x, y] integer seeds")
+        elif _valid_bbox(source_bbox):
+            left, top, width, height = source_bbox
+            if any(not (left <= seed[0] < left + width and top <= seed[1] < top + height) for seed in seeds):
+                _error(errors, "SPEC_LOCAL_PICTURE_SEEDS_INVALID", f"{path}.foreground_seeds", "every seed must lie inside source_bbox")
+
+        pixel_size = item.get("pixel_size")
+        if not _valid_size(pixel_size) or any(not isinstance(value, int) or isinstance(value, bool) for value in pixel_size):
+            _error(errors, "SPEC_LOCAL_PICTURE_ASSET_DIMENSIONS_INVALID", f"{path}.pixel_size", "must contain two positive integers")
+        elif _valid_bbox(source_bbox) and pixel_size != source_bbox[2:4]:
+            _error(errors, "SPEC_LOCAL_PICTURE_ASSET_DIMENSIONS_INVALID", f"{path}.pixel_size", "pixel_size must equal source_bbox width and height")
+
+        alpha_hash = item.get("alpha_mask_sha256")
+        if not isinstance(alpha_hash, str) or not SHA256_PATTERN.fullmatch(alpha_hash):
+            _error(errors, "SPEC_LOCAL_PICTURE_ALPHA_MASK_INVALID", f"{path}.alpha_mask_sha256", "must contain 64 hex characters")
+        asset_path = Path(item["asset_path"]).expanduser() if isinstance(item.get("asset_path"), str) else None
+        if asset_path is None or not asset_path.is_absolute() or asset_path.is_symlink() or not asset_path.is_file():
+            _error(errors, "SPEC_LOCAL_PICTURE_ASSET_INVALID", f"{path}.asset_path", "asset must be a readable non-symlink PNG file")
+        else:
+            resolved_asset = asset_path.resolve()
+            if resolved_asset.suffix.lower() != ".png":
+                _error(errors, "SPEC_LOCAL_PICTURE_ASSET_INVALID", f"{path}.asset_path", "asset must be PNG")
+            if resolved_asset.parent.name != "pictures" or resolved_asset.parent.parent.name != "assets":
+                _error(errors, "SPEC_LOCAL_PICTURE_ASSET_LOCATION_INVALID", f"{path}.asset_path", "asset parent must be assets/pictures")
+            asset_hash = item.get("asset_sha256")
+            if not isinstance(asset_hash, str) or not SHA256_PATTERN.fullmatch(asset_hash):
+                _error(errors, "SPEC_LOCAL_PICTURE_ASSET_HASH_INVALID", f"{path}.asset_sha256", "asset sha256 must contain 64 hex characters")
+            elif _file_sha256(resolved_asset).lower() != asset_hash.lower():
+                _error(errors, "SPEC_LOCAL_PICTURE_ASSET_HASH_MISMATCH", f"{path}.asset_sha256", "asset hash does not match current file")
+            if resolved_asset.suffix.lower() == ".png":
+                try:
+                    with Image.open(resolved_asset) as image:
+                        image.load()
+                        if _valid_size(pixel_size) and image.size != tuple(pixel_size):
+                            _error(errors, "SPEC_LOCAL_PICTURE_ASSET_DIMENSIONS_INVALID", path, "decoded asset dimensions must match pixel_size")
+                        if image.mode != "RGBA":
+                            _error(errors, "SPEC_LOCAL_PICTURE_ALPHA_CONTENT_INVALID", f"{path}.asset_path", "picture PNG must use RGBA mode")
+                        else:
+                            alpha = image.getchannel("A")
+                            minimum, maximum = alpha.getextrema()
+                            if minimum != 0 or maximum == 0:
+                                _error(errors, "SPEC_LOCAL_PICTURE_ALPHA_CONTENT_INVALID", f"{path}.asset_path", "picture alpha must contain transparent background and visible foreground")
+                            actual_alpha_hash = hashlib.sha256(alpha.tobytes()).hexdigest()
+                            if isinstance(alpha_hash, str) and SHA256_PATTERN.fullmatch(alpha_hash) and actual_alpha_hash.lower() != alpha_hash.lower():
+                                _error(errors, "SPEC_LOCAL_PICTURE_ALPHA_MASK_MISMATCH", f"{path}.alpha_mask_sha256", "alpha mask hash does not match the current picture asset")
+                            foreground = alpha.getbbox()
+                            if foreground is not None and (
+                                foreground[0] == 0
+                                or foreground[1] == 0
+                                or foreground[2] == image.width
+                                or foreground[3] == image.height
+                            ):
+                                _error(errors, "SPEC_LOCAL_PICTURE_FOREGROUND_TOUCHES_EDGE", f"{path}.asset_path", "visible picture pixels must not touch the crop boundary")
+                            if valid_seeds and _valid_bbox(source_bbox):
+                                left, top = source_bbox[:2]
+                                if any(alpha.getpixel((seed[0] - left, seed[1] - top)) == 0 for seed in seeds):
+                                    _error(errors, "SPEC_LOCAL_PICTURE_SEEDS_INVALID", f"{path}.foreground_seeds", "every seed must select visible foreground in the current asset")
+                        if source_path is not None and source_path.is_absolute() and source_path.is_file() and _valid_bbox(source_bbox):
+                            with Image.open(source_path.resolve()) as source_image:
+                                source_image.load()
+                                left, top, width, height = source_bbox
+                                source_crop = source_image.convert("RGB").crop((left, top, left + width, top + height))
+                            asset_rgb = image.convert("RGB")
+                            if source_crop.size != asset_rgb.size or source_crop.tobytes() != asset_rgb.tobytes():
+                                _error(errors, "SPEC_LOCAL_PICTURE_RGB_MISMATCH", f"{path}.asset_path", "asset RGB pixels must exactly match the bound source crop")
+                except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
+                    _error(errors, "SPEC_LOCAL_PICTURE_ALPHA_CONTENT_INVALID", f"{path}.asset_path", "picture asset is not a readable PNG")
+
+        if isinstance(element, dict):
+            content = element.get("content")
+            element_asset = content.get("asset") if isinstance(content, dict) else None
+            if not isinstance(element_asset, dict) or (
+                element_asset.get("path") != item.get("asset_path")
+                or element_asset.get("asset_sha256") != item.get("asset_sha256")
+                or element_asset.get("pixel_size") != item.get("pixel_size")
+            ):
+                _error(errors, "SPEC_LOCAL_PICTURE_ELEMENT_ASSET_INVALID", f"{path}.element_id", "element asset must match the local picture record")
+            if not isinstance(content, dict) or content.get("mode") != "none":
+                _error(errors, "SPEC_LOCAL_PICTURE_FRAMING_INVALID", f"{path}.element_id", "local transparent picture requires mode none")
+            zero_crop = {side: 0 for side in ("left", "top", "right", "bottom")}
+            if not isinstance(content, dict) or content.get("crop") != zero_crop:
+                _error(errors, "SPEC_LOCAL_PICTURE_FRAMING_INVALID", f"{path}.element_id", "local transparent picture requires zero crop")
+
+        if item.get("rgb_preserved") is not True:
+            _error(errors, "SPEC_LOCAL_PICTURE_RGB_PRESERVATION_INVALID", f"{path}.rgb_preserved", "must be true")
+        if item.get("validation") != "passed":
+            _error(errors, "SPEC_LOCAL_PICTURE_VALIDATION_INVALID", f"{path}.validation", "must be passed")
+        if not isinstance(item.get("selectable_picture_verified"), bool):
+            _error(errors, "SPEC_LOCAL_PICTURE_SELECTABILITY_INVALID", f"{path}.selectable_picture_verified", "must be boolean")
+        elif stage == "final" and not item["selectable_picture_verified"]:
+            _error(errors, "SPEC_LOCAL_PICTURE_SELECTABILITY_NOT_VERIFIED", f"{path}.selectable_picture_verified", "final spec requires an independently selectable picture")
+        if item.get("object_type") != "picture":
+            _error(errors, "SPEC_LOCAL_PICTURE_OBJECT_TYPE_INVALID", f"{path}.object_type", "must be picture")
+
+
 def _identity_only_final(
     spec: dict[str, Any],
     *,
@@ -1654,6 +1868,13 @@ def validate_spec(
     if not isinstance(modules, dict):
         _error(errors, "SPEC_MODULES_INVALID", "modules", "modules must be an object")
         modules = {}
+    if modules.get("picture_framing") and "picture_framing" not in activated:
+        _error(
+            errors,
+            "SPEC_MODULE_NOT_ACTIVATED",
+            "modules.picture_framing",
+            "non-empty picture_framing module must be listed in activated_modules",
+        )
     for module_name in activated:
         if module_name not in ALLOWED_MODULES:
             _error(errors, "SPEC_ACTIVATED_MODULE_UNKNOWN", f"activated_modules.{module_name}", "unknown module name")
@@ -1709,6 +1930,16 @@ def validate_spec(
     if "icons" in activated:
         _validate_icons(
             modules.get("icons"),
+            element_map,
+            canvas,
+            spec.get("clean_visual_reference"),
+            spec.get("page_id"),
+            stage,
+            errors,
+        )
+    if "picture_framing" in activated:
+        _validate_picture_framing(
+            modules.get("picture_framing"),
             element_map,
             canvas,
             spec.get("clean_visual_reference"),

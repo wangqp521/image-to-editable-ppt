@@ -13,6 +13,8 @@ description: Use when converting one or more uploaded images, screenshots, expor
 
 schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口。精简流程不得削弱 Text Run、Paragraph、原生 bullet、表格 merge、connector、crop、background 与 OOXML 安全规则。
 
+无法由当前原生对象准确表达、且 `required_editability=labels_only|none` 的复杂装饰，使用[图片与图标](references/pictures-and-icons.md)中的“非图标局部透明 picture”入口；元素仍为 `kind=picture`、representation 仍为 `selected_mode=asset`，不得冒充图标或扩展新元素类型。
+
 ## 验证模式
 
 `verification_profile` 和 `delivery_status` 必须显式写入每页规格。`verification_profile` 在一个批次内固定；每次首次或修复后重新进入 prebuild 前，页面专用 `prepare_spec.py` 必须写 `delivery_status=pending`。不得依赖验证器补默认值。prebuild 冻结后只由页面专用 `finalize_spec.py` 把状态改为当前 profile 的终态：rapid 使用 `rapid_validated|rapid_validation_failed`，reviewed 使用 `reviewed_passed|reviewed_failed`。
@@ -34,7 +36,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
 
-首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字；对无填充、无边框且周围有已确认空白的文本框，首次按文字对齐锚点预留 `0.5em` 安全区，不改字号、换行或视觉锚点。preview 只验证残余裁切，不是计划中的统一扩框或缩字号阶段；不得全局启用 AutoFit。精确公式、受限容器与字号兜底规则见[文字与可编辑性](references/text-and-editability.md)。
+首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字。无填充、无边框的自由文本按 alignment 只向需要容量的一侧预留 `0.5em`：`left` 向右、`right` 向左、`center` 左右各扩；必须先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox`，保持 margins、字号、换行和视觉锚点。页面边界、表格、卡片等受限容器依次处理 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字或清零全部 margin。preview 只验证残余裁切；精确公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
 
 简单 2D `pie|doughnut|column|bar|line` 在分类、系列、数值、轴、图例与标签均可确认时使用原生 Chart。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足时保留当页最小局部 picture。
 

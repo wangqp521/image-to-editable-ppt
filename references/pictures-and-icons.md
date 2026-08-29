@@ -43,10 +43,24 @@ python3 scripts/extract_icon_asset.py source.png \
 
 ## 非图标图片
 
-写入 `modules.picture_framing` 并绑定 element：素材路径/hash、source/slide bbox、原始/显示比例、`contain|cover|none`、四边 crop、焦点/偏移、mask、圆角、rotation、transparency、border/shadow/reflection/glow 和 picture fill 的 stretch/tile/alignment。
+普通照片、Logo、截图和已有透明素材继续作为普通 `kind=picture` 使用。当前 renderer 只实现既有 picture asset、`mode`、四边 crop、rotation 与 opacity；不要在规格中声明尚未实现的 mask、圆角、reflection、glow 或 picture fill 扩展。
 
-优先保持来源像素和宽高比；只有来源确为图片填充时才用 picture fill。`cover` 不得无证据居中，不得裁掉主体；crop 不得带入邻近文字、图标、边框或线；不扩图、不补被裁区域。圆形保持正圆；mask/alpha 抗锯齿连续，无白边、黑边、绿幕、色晕、断裂或不透明 halo。无平铺证据不得 tile，背景不得有接缝/漏底/重复。
+### 非图标局部透明 picture
 
-border/shadow/reflection/glow 只在来源可见时使用，分别记录方向、距离、blur、透明度、颜色、扩散和层级；不得套默认效果。以整页查构图、位置、焦点和层级，再以 200%–300% 查 crop/mask/alpha/圆角/边框/效果。误裁、拉伸、边缘断裂、拼接缝或效果方向错误不得通过。
+长弯箭头、飘带、光效、手绘线条等复杂装饰，如果当前原生 shape/line/connector 无法准确表达，且 representation plan 已选择 `selected_mode=asset`、`fallback_policy=allow_minimal_asset`、`required_editability=labels_only|none`，可从当前页 `clean_visual_reference` 的明确局部 bbox 中提取为透明 PNG。它是“复杂装饰的局部 picture”，不是图标；element 保持 `kind=picture`，输出固定写入当页 `assets/pictures/<picture-id>.png`。
 
-纯色必须写明确 RGB/alpha；无填充边框在最终 OOXML 中必须是真正 `noFill`。不得用不透明色块掩盖透明边缘问题，也不得为空刷新 hash 改动无关图片。
+`extract_picture_asset.py` 是该类资产的唯一生产入口。bbox 使用来源像素坐标 `[x,y,w,h]`，必须包含目标完整轮廓和少量可学习的周边背景；每个 `--foreground-seed` 是来源坐标中的目标前景点。目标包含多个彼此断开的部件时，为每个需保留的部件重复提供一个 seed。脚本复用图标入口已有的边缘连通背景识别，只保留 seed 所在的 8-connected 前景部件；来源裁块的 RGB 逐像素保持不变，只修改 alpha。
+
+```bash
+python3 scripts/extract_picture_asset.py source.png \
+  --picture-id curved-arrow \
+  --bbox-xywh X,Y,W,H \
+  --foreground-seed SX,SY \
+  --output page/assets/pictures/curved-arrow.png
+```
+
+该入口适合“目标装饰与背景可由连通关系稳定分离”的场景。以下情况直接视为不适用，不增加 ROI、颜色分类、AI 分割或页面专用裁切逻辑：目标与文字/图标真实相交且不可分离；照片、纹理、渐变背景导致边缘背景无法稳定学习；seed 无法唯一命中目标；完整目标在合理 bbox 中仍触边。此时保留更大的最小局部 picture，或明确记录当前无法高保真分离。
+
+每个产物写入 `modules.picture_framing.pictures[]`，并把 `picture_framing` 加入 `activated_modules`；记录 `picture_id/element_id/semantic_role`、source/slide bbox、layer、source path/hash、固定 `crop_mode=alpha_isolation_seeded`、source-coordinate `foreground_seeds`、`assets/pictures` 路径/hash、alpha hash、pixel size、`rgb_preserved=true`、validation、selectability 与 `object_type=picture`。绑定 element 的 asset/path/hash/尺寸必须一致，并使用 `mode=none`、四边 crop 全零。prebuild 会检查来源绑定、RGBA、透明/可见像素、seed 命中、前景不触边、RGB 一致和当前文件 hash；最终阶段再要求该 picture 可独立选择。
+
+局部透明 picture 不生成图标绿幕预览，也不新增独立视觉轮次；位置、比例、层级和整体观感继续由既有整页 preview 与语义视觉判断验证。

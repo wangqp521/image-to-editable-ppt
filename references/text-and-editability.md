@@ -34,21 +34,36 @@ spans = [{"start": start, "end": start + 1, "color": ORANGE}]
 
 ### 首次最小安全扩框
 
-只处理无填充、无边框、`wrap=false` 且左右均有已确认空白的高风险 TextBox。首次固定使用 `p=0.5em`：`p_pt=max_run_font_size_pt×0.5`、`p_source_px=p_pt/scale_pt_per_source_px`、`p_emu=p_pt×12700`；复用页面既有 mapping，不使用固定 DPI，不运行测字、碰撞搜索或额外 preview。设来源 TextBox 为 `x,w`，先在 source 坐标执行 `x'=x-p_source_px`、`w'=w+2p_source_px`，再由既有 mapping 生成 element `slide_bbox`；typography 边距 `ml,mr` 使用 EMU，并按 alignment 保持视觉锚点：
+先把高风险 TextBox 分为自由文本和受限文本。自由文本必须同时满足：无填充、无边框、`wrap=false`，且扩展方向存在已确认空白。首次固定使用 `p=0.5em`：`p_pt=max_run_font_size_pt×0.5`、`p_source_px=p_pt/scale_pt_per_source_px`、`p_emu=p_pt×12700`；复用页面既有 mapping，不使用固定 DPI，不调用 `TextRange2`、字体 API 或自动测字，不运行碰撞搜索或额外 preview。
 
-| alignment | `margin_left'` | `margin_right'` | 保持不变的锚点 |
-|---|---:|---:|---|
-| `left` | `ml+p_emu` | `mr` | slide `x'+margin_left'=x+ml` |
-| `center` | `ml` | `mr` | 可用文本区中心不变 |
-| `right` | `ml` | `mr+p_emu` | slide `x'+w'-margin_right'=x+w-mr` |
+设来源 TextBox 为 `x,w`，typography 左右 margins 为 `ml,mr`。先在 source 坐标按 alignment 扩展，再由既有 mapping 生成 element `slide_bbox`；首次容量扩展不修改 margins：
 
-左对齐不得同时增加 `margin_right`，右对齐不得同时增加 `margin_left`；对所有 alignment 同时补偿左右 margin 会把新增可用宽度抵消，只得到更大的外框，不能解决末字裁切。element `source_bbox` 必须写扩展后的 source 框，`kind=text` element 的 `slide_bbox` 必须由该框按 canvas mapping 生成并与 typography `text_box` 完全同步；原始字形/来源测量框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID`。扩框只进入已确认空白，不改 y/h、字号、字体、字距、Paragraph、Text Run、换行或垂直对齐。
+| alignment | 空白条件 | source 变换 | margins | 必须保持的结果 |
+|---|---|---|---|---|
+| `left` | 右侧 `≥p_source_px` | `x'=x; w'=w+p_source_px` | `ml'=ml; mr'=mr` | 文字起点不变，可用宽度增加 `p_emu` |
+| `right` | 左侧 `≥p_source_px` | `x'=x-p_source_px; w'=w+p_source_px` | `ml'=ml; mr'=mr` | 文字右锚点不变，可用宽度增加 `p_emu` |
+| `center` | 左右各 `≥p_source_px` | `x'=x-p_source_px; w'=w+2p_source_px` | `ml'=ml; mr'=mr` | 可用文本区中心不变，可用宽度增加 `2p_emu` |
 
-页面边界、表格单元格、矩阵格子、卡片标签及其他受限容器不能提供完整 `0.5em` 空白时，不盲目执行上述首次扩框，也不得越过来源容器。首次 preview 只在普通视图验证残余首尾裁切、错误换行和扩框重叠；悬停或双击后显示完整不能算通过。若仍有裁切，把全部文字问题合入唯一一次集中修复：外侧仍有空白时沿用同一锚点公式把目标框安全区提高到最多 `1.0em`；受限容器内先调整 box 与 margin，来源本来允许自动换行时才调整 wrap。
+`justify|distributed` 不使用自由文本公式，进入受限文本分支。以 slide EMU 计算 `usable_width=slide_width-ml-mr`；变换后 `left|right` 必须满足 `usable_width'-usable_width≥p_emu`，`center` 必须满足 `≥2p_emu`。不满足说明新增空间被 margin 抵消，禁止进入 build。element `source_bbox` 必须写扩展后的 source 框，`kind=text` element 的 `slide_bbox` 必须由该框按 canvas mapping 生成并与 typography `text_box` 完全同步；原始字形/来源测量框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID`。
+
+如果容量已经足够、只有对齐锚点一侧的字形 overhang 被外框裁切，则只在该侧扩展外框并给同侧 margin 增加等量 `p_emu`，保持文字锚点和 `usable_width` 不变；不得把这条 overhang 规则用于末字容量不足。所有扩框只进入已确认空白，不改 y/h、字号、字体、字距、Paragraph、Text Run、换行或垂直对齐。
+
+页面边界、表格单元格、矩阵格子、卡片标签及其他受限容器不能提供完整 `0.5em` 空白时，不越过来源容器。按下列固定顺序处理：先调整 box；再只回收不承担视觉锚点的 margin（`left` 只动右侧、`right` 只动左侧、`center` 左右等量）；来源本来允许自动换行时才调整 wrap；仍不足且生成字形确实比来源偏大时，才按下一节公式校准同一语义组字号。不得清零全部 margins。
+
+首次 preview 只在普通视图验证残余首尾裁切、错误换行和扩框重叠；悬停或双击后显示完整不能算通过。若仍有裁切，把全部文字问题合入唯一一次集中修复：外侧仍有空白时沿用相同 alignment 公式，把对应方向的安全区提高到最多 `1.0em`；受限容器继续执行同一固定顺序。
 
 缩小字号不是裁切的默认修复。只有固定框受硬边界约束、box/margin/wrap 均不能在不破坏来源布局的前提下容纳文字，并且生成字形确实比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组；不得逐框“减 1pt”试排。若字号与来源一致而只是首尾裁切，继续修 box/margin，不以缩字掩盖容量不足。
 
-统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。只有固定框无法在不破坏来源布局的前提下容纳文字、且用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit；这不属于当前页面的 preview 后补丁。
+统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。当前 schema/compiler 的单个 `overflow` 同时控制水平与垂直 overflow；文字裁切修复必须保持规格原值，不得把 `overflow=true` 或直接写 `horzOverflow|vertOverflow=overflow` 当作保险。只有固定框无法在不破坏来源布局的前提下容纳文字、且用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit 或分轴 overflow；这不属于当前页面的 preview 后补丁。
+
+### 裁切处理速查
+
+| 症状 | 一线修复 | 仍失败时 | 不要做 |
+|---|---|---|---|
+| 自由文本末端容量不足 | 按 alignment 扩展非锚点方向并重算 mapping | 同方向安全区最多提高到 `1.0em` | overflow、测字、改字号 |
+| 锚点侧 glyph overhang | 外框与同侧 margin 等量扩展 | 合入唯一集中修复复核 | 把 overhang 当容量不足 |
+| 受限容器容量不足 | box → 非锚点 margin → 来源允许的 wrap | 实测字形偏大时按比例校准语义组字号 | 清零全部 margin、逐框减 `1pt` |
+| 编辑态完整、普通视图裁切 | 按固定框容量问题处理 | 普通视图 preview 判定 | 以悬停/双击态判通过 |
 
 ## 行距、段距与框内垂直位置
 

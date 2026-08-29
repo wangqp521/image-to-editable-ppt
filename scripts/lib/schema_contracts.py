@@ -462,6 +462,38 @@ ICON_ITEM_FIELDS = frozenset(
         "object_type",
     }
 )
+PICTURE_FRAMING_MODULE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "page_id",
+        "slide_coordinate_unit",
+        "clean_visual_reference",
+        "clean_visual_sha256",
+        "pictures",
+    }
+)
+LOCAL_PICTURE_ITEM_FIELDS = frozenset(
+    {
+        "picture_id",
+        "element_id",
+        "semantic_role",
+        "source_bbox",
+        "slide_bbox",
+        "layer",
+        "source_path",
+        "source_sha256",
+        "crop_mode",
+        "foreground_seeds",
+        "asset_path",
+        "asset_sha256",
+        "alpha_mask_sha256",
+        "pixel_size",
+        "rgb_preserved",
+        "validation",
+        "selectable_picture_verified",
+        "object_type",
+    }
+)
 
 
 class ContractConstructionError(ValueError):
@@ -970,6 +1002,41 @@ _RECORDS: dict[str, dict[str, Any]] = {
             "icons": _array(_ref("IconItem"), minimum=1),
         }
     ),
+    "LocalPictureItem": _object(
+        {
+            "picture_id": NON_EMPTY_STRING,
+            "element_id": NON_EMPTY_STRING,
+            "semantic_role": NON_EMPTY_STRING,
+            "source_bbox": BBOX,
+            "slide_bbox": BBOX,
+            "layer": POSITIVE_INTEGER,
+            "source_path": ABSOLUTE_PATH,
+            "source_sha256": SHA256,
+            "crop_mode": {"const": "alpha_isolation_seeded"},
+            "foreground_seeds": _array(
+                _tuple(NONNEGATIVE_INTEGER, NONNEGATIVE_INTEGER),
+                minimum=1,
+            ),
+            "asset_path": ABSOLUTE_PATH,
+            "asset_sha256": SHA256,
+            "alpha_mask_sha256": SHA256,
+            "pixel_size": SIZE,
+            "rgb_preserved": {"const": True},
+            "validation": {"const": "passed"},
+            "selectable_picture_verified": BOOLEAN,
+            "object_type": {"const": "picture"},
+        }
+    ),
+    "PictureFramingModule": _object(
+        {
+            "schema_version": {"const": 2},
+            "page_id": {"type": "string", "pattern": "^page-[0-9]{3}$"},
+            "slide_coordinate_unit": {"const": "EMU"},
+            "clean_visual_reference": ABSOLUTE_PATH,
+            "clean_visual_sha256": SHA256,
+            "pictures": _array(_ref("LocalPictureItem"), minimum=1),
+        }
+    ),
     "ChartSlice": _object(
         {
             "category": NULLABLE_STRING,
@@ -1320,7 +1387,7 @@ _RECORDS["Modules"] = _object(
         "representation_plan": _ref("RepresentationPlanModule"),
         "background": _ref("BackgroundModule"),
         "special_text": {"type": "object"},
-        "picture_framing": {"type": "object"},
+        "picture_framing": _ref("PictureFramingModule"),
         "graphics": {"type": "object"},
         "diagram": {"type": "object"},
         "chart": {"type": "object"},

@@ -56,6 +56,15 @@ def build_content_projection(spec: dict[str, Any]) -> dict[str, Any]:
         for item in icons if isinstance(icons, list) else []:
             if isinstance(item, dict):
                 item.pop("selectable_picture_verified", None)
+        picture_module = modules.get("picture_framing")
+        pictures = (
+            picture_module.get("pictures", [])
+            if isinstance(picture_module, dict)
+            else []
+        )
+        for item in pictures if isinstance(pictures, list) else []:
+            if isinstance(item, dict):
+                item.pop("selectable_picture_verified", None)
     activated = projected.get("activated_modules")
     if isinstance(activated, list):
         projected["activated_modules"] = [

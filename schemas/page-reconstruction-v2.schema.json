@@ -1801,6 +1801,169 @@
       ],
       "type": "object"
     },
+    "LocalPictureItem": {
+      "additionalProperties": false,
+      "properties": {
+        "alpha_mask_sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "asset_path": {
+          "minLength": 2,
+          "pattern": "^/",
+          "type": "string"
+        },
+        "asset_sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "crop_mode": {
+          "const": "alpha_isolation_seeded"
+        },
+        "element_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "foreground_seeds": {
+          "items": {
+            "items": false,
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "layer": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "object_type": {
+          "const": "picture"
+        },
+        "picture_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "pixel_size": {
+          "items": false,
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "minimum": 1,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "rgb_preserved": {
+          "const": true
+        },
+        "selectable_picture_verified": {
+          "type": "boolean"
+        },
+        "semantic_role": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "slide_bbox": {
+          "items": false,
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "minimum": 1,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "source_bbox": {
+          "items": false,
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "minimum": 1,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "source_path": {
+          "minLength": 2,
+          "pattern": "^/",
+          "type": "string"
+        },
+        "source_sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "validation": {
+          "const": "passed"
+        }
+      },
+      "required": [
+        "alpha_mask_sha256",
+        "asset_path",
+        "asset_sha256",
+        "crop_mode",
+        "element_id",
+        "foreground_seeds",
+        "layer",
+        "object_type",
+        "picture_id",
+        "pixel_size",
+        "rgb_preserved",
+        "selectable_picture_verified",
+        "semantic_role",
+        "slide_bbox",
+        "source_bbox",
+        "source_path",
+        "source_sha256",
+        "validation"
+      ],
+      "type": "object"
+    },
     "Margins": {
       "additionalProperties": false,
       "properties": {
@@ -1875,7 +2038,7 @@
           "$ref": "#/$defs/PageLayoutModule"
         },
         "picture_framing": {
-          "type": "object"
+          "$ref": "#/$defs/PictureFramingModule"
         },
         "representation_plan": {
           "$ref": "#/$defs/RepresentationPlanModule"
@@ -2210,6 +2373,46 @@
         "asset",
         "crop",
         "mode"
+      ],
+      "type": "object"
+    },
+    "PictureFramingModule": {
+      "additionalProperties": false,
+      "properties": {
+        "clean_visual_reference": {
+          "minLength": 2,
+          "pattern": "^/",
+          "type": "string"
+        },
+        "clean_visual_sha256": {
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "type": "string"
+        },
+        "page_id": {
+          "pattern": "^page-[0-9]{3}$",
+          "type": "string"
+        },
+        "pictures": {
+          "items": {
+            "$ref": "#/$defs/LocalPictureItem"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "slide_coordinate_unit": {
+          "const": "EMU"
+        }
+      },
+      "required": [
+        "clean_visual_reference",
+        "clean_visual_sha256",
+        "page_id",
+        "pictures",
+        "schema_version",
+        "slide_coordinate_unit"
       ],
       "type": "object"
     },
@@ -3262,5 +3465,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "da5a531de1de768f54ee407032eed3da9d391628b19c8308ceb526329f82f260"
+  "x-schema-contract-sha256": "932ed86f8753fa23bf6d9fb771dc2cc38374caa691d3fb69e6353c5663306746"
 }
