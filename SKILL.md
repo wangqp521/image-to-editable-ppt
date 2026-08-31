@@ -15,36 +15,6 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 无法由当前原生对象准确表达、且 `required_editability=labels_only|none` 的复杂装饰，使用[图片与图标](references/pictures-and-icons.md)中的“非图标局部透明 picture”入口；元素仍为 `kind=picture`、representation 仍为 `selected_mode=asset`，不得冒充图标或扩展新元素类型。
 
-## 表示规划硬门禁
-
-先按“可独立选择或编辑的语义单元”拆分 source fact，再决定表示法。同一 fact 的主视觉职责和 `required_editability` 必须一致。`labels_only` 是唯一混合绑定例外：一个 asset fact 可绑定恰好一个 picture/icon 与一个或多个原生 `text|special_text` 标签；其他原生 Shape、connector、编号圆点或流程框必须拆成独立 native fact，并按来源层级重叠。不得因空间邻近、共同构成一张图或用户笼统要求“尽量可编辑”而把异质几何合并。
-
-`native` 必须同时通过可编辑性与视觉保真门禁：当前已支持的原生对象能够复刻全部可见轮廓、填充、效果、遮挡和连接关系，且在目标放映尺寸下没有可见保真损失。只能表达相同语义、需要自由曲线/自定义路径/自动描摹、或必须用大量基础 Shape 近似复杂轮廓时，均不算通过；此时先拆出可编辑标签，视觉主体走最小局部 asset。`required_editability` 按各 fact 的内容角色确定，不得先写 `full` 再用近似重绘满足它。
-
-| 来源语义单元 | representation | 资产入口 |
-|---|---|---|
-| 普通文字、数据、表格、受支持基础图形和可准确表达的简单 connector | `native` 或必要的 `composite` | 无 |
-| 与周边结构分离、可独立选择的单一象形符号 | `asset`，`required_editability=none` | `extract_icon_asset.py` |
-| 照片、Logo、截图或已有透明素材 | `asset` | 普通 `kind=picture` |
-| 插画、自由曲线、手绘笔触、复杂装饰、复合线稿，或多个图标状部件共同形成的单一视觉主体 | `asset`，`required_editability=labels_only|none` | `extract_picture_asset.py` |
-
-最小局部 picture 的 bbox 以完整语义主体为边界，不以提取器容易通过的单个零件为边界；只包含该主体的全部可见像素、阴影/光效和少量可学习背景。主体有多个断开的部件时，优先在同一个 picture 中为每个需保留部件提供一个 `foreground-seed`，不得仅为规避触边或连通性问题把一个主体碎切成多张图。
-
-资产提取失败时按以下顺序处理，失败本身不得成为 native 重绘的理由：
-
-1. 可见前景触及 bbox 边缘：扩大到完整语义主体和少量背景后，只重跑该资产。
-2. 主体由断开部件组成：保持一个 fact 和一个 picture，补齐多个来源坐标 `foreground-seed`。
-3. 主体与原生标签邻近或互相遮挡但像素可分：提取主体；需要 `labels_only` 时把一个 picture/icon 与原生 `text|special_text` 标签绑定到同一 asset fact，标签语义独立时可另建 native fact；非文本原生几何始终另建 fact。全部对象按来源层级放置。
-4. 目标与文字/图标真实相交且无法稳定分离：保留更大的最小局部 picture，或明确记录无法高保真分离；若局部 picture 必然包含必须可编辑的文字，不得声称 `labels_only` 已满足。
-
-### 表示规划反模式
-
-- 不得把插画及其可编辑标签绑定成一个 `native/full/forbid` fact。
-- 不得把复合插画拆成若干“图标”来绕过非图标 picture 入口。
-- 不得用自由曲线、自定义 SVG、图标库、背景补绘、阈值抠图或大量基础 Shape 近似来源插画。
-- 不得在局部提取失败后改用原截图作含前景的整页底图，再叠加重复的原生内容。
-- 不得通过裁掉触边轮廓、阴影、小部件或改变来源 RGB 来让资产通过校验。
-
 ## 验证模式
 
 `verification_profile` 和 `delivery_status` 必须显式写入每页规格。`verification_profile` 在一个批次内固定；每次首次或修复后重新进入 prebuild 前，页面专用 `prepare_spec.py` 必须写 `delivery_status=pending`。不得依赖验证器补默认值。prebuild 冻结后只由页面专用 `finalize_spec.py` 把状态改为当前 profile 的终态：rapid 使用 `rapid_validated|rapid_validation_failed`，reviewed 使用 `reviewed_passed|reviewed_failed`。
@@ -66,7 +36,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
 
-首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。在 `prepare_spec.py` 中识别逼近水平边界的高风险 TextBox，优先关注 `wrap=false` 的多 Text Run、粗体和长单行文字。无填充、无边框的自由文本按 alignment 只向需要容量的一侧预留 `0.5em`：`left` 向右、`right` 向左、`center` 左右各扩；必须先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox`，保持 margins、字号、换行和视觉锚点。页面边界、表格、卡片等受限容器依次处理 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字或清零全部 margin。preview 只验证残余裁切；精确公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
+首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。所有无填充、无边框、水平、`wrap=false` 且 `alignment=left|right|center` 的自由单行文字，不再先判断“高风险”或固定增加 `0.5em/1.0em`；必须根据现有元素盘点确定所属水平通道的 `safe_left/safe_right`，按 alignment 扩展到安全跨度：`left` 保持左锚点并扩到 `safe_right`，`right` 保持右锚点并扩到 `safe_left`，`center` 保持中心并对称扩展。先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox` 并同步 typography `text_box`；保持 y/h、margins、字号、Text Run、换行、overflow 和视觉锚点。`wrap=true`、有可见容器、邻近前景元素、页面硬边界或 `justify|distributed` 等受限文字，依次处理容器内 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字、清零全部 margin 或把文字图片化。preview 必须在普通视图检查首尾字符、意外换行和新增重叠；预览不可用时按当前 profile 标记视觉未验证，不得宣称裁切已解决。精确边界、公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
 
 简单 2D `pie|doughnut|column|bar|line` 在分类、系列、数值、轴、图例与标签均可确认时使用原生 Chart。3D、组合/双轴、趋势线、渐变纹理、平滑曲线、复杂阴影或证据不足时保留当页最小局部 picture。
 
