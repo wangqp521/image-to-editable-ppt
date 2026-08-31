@@ -15,36 +15,6 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 无法由当前原生对象准确表达、且 `required_editability=labels_only|none` 的复杂装饰，使用[图片与图标](references/pictures-and-icons.md)中的“非图标局部透明 picture”入口；元素仍为 `kind=picture`、representation 仍为 `selected_mode=asset`，不得冒充图标或扩展新元素类型。
 
-## 表示规划硬门禁
-
-先按“可独立选择或编辑的语义单元”拆分 source fact，再决定表示法。同一 fact 的主视觉职责和 `required_editability` 必须一致。`labels_only` 是唯一混合绑定例外：一个 asset fact 可绑定恰好一个 picture/icon 与一个或多个原生 `text|special_text` 标签；其他原生 Shape、connector、编号圆点或流程框必须拆成独立 native fact，并按来源层级重叠。不得因空间邻近、共同构成一张图或用户笼统要求“尽量可编辑”而把异质几何合并。
-
-`native` 必须同时通过可编辑性与视觉保真门禁：当前已支持的原生对象能够复刻全部可见轮廓、填充、效果、遮挡和连接关系，且在目标放映尺寸下没有可见保真损失。只能表达相同语义、需要自由曲线/自定义路径/自动描摹、或必须用大量基础 Shape 近似复杂轮廓时，均不算通过；此时先拆出可编辑标签，视觉主体走最小局部 asset。`required_editability` 按各 fact 的内容角色确定，不得先写 `full` 再用近似重绘满足它。
-
-| 来源语义单元 | representation | 资产入口 |
-|---|---|---|
-| 普通文字、数据、表格、受支持基础图形和可准确表达的简单 connector | `native` 或必要的 `composite` | 无 |
-| 与周边结构分离、可独立选择的单一象形符号 | `asset`，`required_editability=none` | `extract_icon_asset.py` |
-| 照片、Logo、截图或已有透明素材 | `asset` | 普通 `kind=picture` |
-| 插画、自由曲线、手绘笔触、复杂装饰、复合线稿，或多个图标状部件共同形成的单一视觉主体 | `asset`，`required_editability=labels_only|none` | `extract_picture_asset.py` |
-
-最小局部 picture 的 bbox 以完整语义主体为边界，不以提取器容易通过的单个零件为边界；只包含该主体的全部可见像素、阴影/光效和少量可学习背景。主体有多个断开的部件时，优先在同一个 picture 中为每个需保留部件提供一个 `foreground-seed`，不得仅为规避触边或连通性问题把一个主体碎切成多张图。
-
-资产提取失败时按以下顺序处理，失败本身不得成为 native 重绘的理由：
-
-1. 可见前景触及 bbox 边缘：扩大到完整语义主体和少量背景后，只重跑该资产。
-2. 主体由断开部件组成：保持一个 fact 和一个 picture，补齐多个来源坐标 `foreground-seed`。
-3. 主体与原生标签邻近或互相遮挡但像素可分：提取主体；需要 `labels_only` 时把一个 picture/icon 与原生 `text|special_text` 标签绑定到同一 asset fact，标签语义独立时可另建 native fact；非文本原生几何始终另建 fact。全部对象按来源层级放置。
-4. 目标与文字/图标真实相交且无法稳定分离：保留更大的最小局部 picture，或明确记录无法高保真分离；若局部 picture 必然包含必须可编辑的文字，不得声称 `labels_only` 已满足。
-
-### 表示规划反模式
-
-- 不得把插画及其可编辑标签绑定成一个 `native/full/forbid` fact。
-- 不得把复合插画拆成若干“图标”来绕过非图标 picture 入口。
-- 不得用自由曲线、自定义 SVG、图标库、背景补绘、阈值抠图或大量基础 Shape 近似来源插画。
-- 不得在局部提取失败后改用原截图作含前景的整页底图，再叠加重复的原生内容。
-- 不得通过裁掉触边轮廓、阴影、小部件或改变来源 RGB 来让资产通过校验。
-
 ## 验证模式
 
 `verification_profile` 和 `delivery_status` 必须显式写入每页规格。`verification_profile` 在一个批次内固定；每次首次或修复后重新进入 prebuild 前，页面专用 `prepare_spec.py` 必须写 `delivery_status=pending`。不得依赖验证器补默认值。prebuild 冻结后只由页面专用 `finalize_spec.py` 把状态改为当前 profile 的终态：rapid 使用 `rapid_validated|rapid_validation_failed`，reviewed 使用 `reviewed_passed|reviewed_failed`。

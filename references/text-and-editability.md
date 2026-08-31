@@ -28,75 +28,41 @@ spans = [{"start": start, "end": start + 1, "color": ORANGE}]
 
 不得手工展开完整 `runs[]`，不得使用正则或“所有数字”等内容类别批量推断样式，也不得通过拆框或硬换行规避 Text Run、Paragraph 或排版问题。
 
-## 固定文本框的安全跨度
+## 固定文本框的字形安全区
 
-普通视图中部分文字被裁切、仅在鼠标悬停或双击编辑态显示完整时，文字内容和 Text Run 仍然存在；按固定 TextBox 容量不足处理，不拆框、不补字、不图片化。来源的可见字形框用于定位文字，不等于最终 TextBox 容量框；不得把无可见边框的 TextBox 收紧到字形边界。
+普通视图中部分文字被裁切、仅在鼠标悬停或双击编辑态显示完整时，文字内容和 Text Run 仍然存在；按固定 TextBox 容量不足处理，不拆框、不补字、不图片化。首次构建前必须预防可判断的裁切：以框内最大 Text Run 字号为 `1em`；来源可见字形到任一水平可用边界小于 `0.5em` 时判为高风险，优先检查 `wrap=false` 的多 Text Run、粗体和长单行文字。不得把无可见边框的 TextBox 收紧到字形边界。
 
-### 自由单行文字默认扩到安全跨度
+### 首次最小安全扩框
 
-同时满足以下条件的文字直接走自由单行分支，不再先判断“高风险”：无填充、无边框、水平排版、`wrap=false`、`alignment=left|right|center`，并且扩展方向存在已确认的连续安全空间。旋转/竖排文字与 `justify|distributed` 不使用本公式。
+先把高风险 TextBox 分为自由文本和受限文本。自由文本必须同时满足：无填充、无边框、`wrap=false`，且扩展方向存在已确认空白。首次固定使用 `p=0.5em`：`p_pt=max_run_font_size_pt×0.5`、`p_source_px=p_pt/scale_pt_per_source_px`、`p_emu=p_pt×12700`；复用页面既有 mapping，不使用固定 DPI，不调用 `TextRange2`、字体 API 或自动测字，不运行碰撞搜索或额外 preview。
 
-根据已经完成的 regions、relationships、层级和元素 bbox 盘点确定水平安全跨度，不新增第二套对象清单或运行时碰撞搜索：
+设来源 TextBox 为 `x,w`，typography 左右 margins 为 `ml,mr`。先在 source 坐标按 alignment 扩展，再由既有 mapping 生成 element `slide_bbox`；首次容量扩展不修改 margins：
 
-1. 有表格单元格、卡片、标签、按钮等可见父容器时，以其内部边界为硬边界并进入受限分支。
-2. 无可见父容器时，依次使用所属 region、页面内容范围、幻灯片边界作为候选外边界。
-3. 同一水平通道中与当前文字垂直范围明显相交的前景图标、其他文字、数据标签、连接线端点和容器边界是硬障碍；背景色块、纹理和底层装饰不是障碍。
-4. 在硬障碍前保留编辑安全间隔 `g_pt=max(1.0, 0.1×max_run_font_size_pt)`，用页面既有 mapping 换算到 source 坐标；经过该间隔处理后的边界记为 `safe_left/safe_right`。
-5. 包含原始可见文字框的连续区间才是当前文字的安全跨度；不存在该区间时进入受限分支。
+| alignment | 空白条件 | source 变换 | margins | 必须保持的结果 |
+|---|---|---|---|---|
+| `left` | 右侧 `≥p_source_px` | `x'=x; w'=w+p_source_px` | `ml'=ml; mr'=mr` | 文字起点不变，可用宽度增加 `p_emu` |
+| `right` | 左侧 `≥p_source_px` | `x'=x-p_source_px; w'=w+p_source_px` | `ml'=ml; mr'=mr` | 文字右锚点不变，可用宽度增加 `p_emu` |
+| `center` | 左右各 `≥p_source_px` | `x'=x-p_source_px; w'=w+2p_source_px` | `ml'=ml; mr'=mr` | 可用文本区中心不变，可用宽度增加 `2p_emu` |
 
-设来源可见文字框为 `x,y,w,h`，在 source 坐标扩展：
+`justify|distributed` 不使用自由文本公式，进入受限文本分支。以 slide EMU 计算 `usable_width=slide_width-ml-mr`；变换后 `left|right` 必须满足 `usable_width'-usable_width≥p_emu`，`center` 必须满足 `≥2p_emu`。不满足说明新增空间被 margin 抵消，禁止进入 build。element `source_bbox` 必须写扩展后的 source 框，`kind=text` element 的 `slide_bbox` 必须由该框按 canvas mapping 生成并与 typography `text_box` 完全同步；原始字形/来源测量框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID`。
 
-| alignment | source 变换 | 必须保持的锚点 |
-|---|---|---|
-| `left` | `x'=x; w'=safe_right-x` | `x'=x` |
-| `right` | `x'=safe_left; w'=x+w-safe_left` | `x'+w'=x+w` |
-| `center` | `c=x+w/2; d=min(c-safe_left, safe_right-c); x'=c-d; w'=2d` | `x'+w'/2=x+w/2` |
+如果容量已经足够、只有对齐锚点一侧的字形 overhang 被外框裁切，则只在该侧扩展外框并给同侧 margin 增加等量 `p_emu`，保持文字锚点和 `usable_width` 不变；不得把这条 overhang 规则用于末字容量不足。所有扩框只进入已确认空白，不改 y/h、字号、字体、字距、Paragraph、Text Run、换行或垂直对齐。
 
-页面专用 `prepare_spec.py` 可以使用下列局部函数；安全跨度仍来自当页既有元素盘点：
+页面边界、表格单元格、矩阵格子、卡片标签及其他受限容器不能提供完整 `0.5em` 空白时，不越过来源容器。按下列固定顺序处理：先调整 box；再只回收不承担视觉锚点的 margin（`left` 只动右侧、`right` 只动左侧、`center` 左右等量）；来源本来允许自动换行时才调整 wrap；仍不足且生成字形确实比来源偏大时，才按下一节公式校准同一语义组字号。不得清零全部 margins。
 
-```python
-def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
-    x, y, width, height = bbox
-    right = x + width
-    center = x + width / 2
-    if alignment == "left":
-        return [x, y, safe_right - x, height]
-    if alignment == "right":
-        return [safe_left, y, right - safe_left, height]
-    half = min(center - safe_left, safe_right - center)
-    return [center - half, y, 2 * half, height]
-```
+首次 preview 只在普通视图验证残余首尾裁切、错误换行和扩框重叠；悬停或双击后显示完整不能算通过。若仍有裁切，把全部文字问题合入唯一一次集中修复：外侧仍有空白时沿用相同 alignment 公式，把对应方向的安全区提高到最多 `1.0em`；受限容器继续执行同一固定顺序。
 
-扩框后必须同时满足：`y/h` 不变；对应 alignment 锚点精确不变；新框位于安全跨度内；左右 margins、字号、字体、字距、Paragraph、Text Run、wrap、overflow 和垂直对齐不变。element `source_bbox` 写扩展后的 source 框，再由 canvas mapping 生成 `slide_bbox`，并与 typography `text_box` 完全同步；原始可见字形框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID` 或 `SPEC_TEXT_BOX_MAPPING_INVALID`。
+缩小字号不是裁切的默认修复。只有固定框受硬边界约束、box/margin/wrap 均不能在不破坏来源布局的前提下容纳文字，并且生成字形确实比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组；不得逐框“减 1pt”试排。若字号与来源一致而只是首尾裁切，继续修 box/margin，不以缩字掩盖容量不足。
 
-如果容量已经足够、只有对齐锚点一侧的 glyph overhang 被外框裁切，则只在该侧扩展外框并给同侧 margin 增加等量，保持文字锚点和 `usable_width` 不变；不得把这条规则用于末字容量不足。
-
-### 受限文字回退
-
-表格单元格、矩阵格子、卡片、标签、按钮、页面硬边界，以及与前景图标或其他文字共享狭窄通道的 TextBox 都是受限文字。`wrap=true` 的多行文字也不套用自由单行公式，避免扩宽后改变来源换行。
-
-受限文字不得越过来源容器或硬障碍，按固定顺序处理：
-
-1. 保持 alignment 锚点，把 box 扩展到容器内部或相邻硬障碍前的安全边界。
-2. 仍不足时，只回收不承担视觉锚点的 margin：`left` 只动右侧、`right` 只动左侧、`center` 左右等量；不得清零全部 margins。
-3. 来源本来允许自动换行时才调整 wrap；来源 `wrap=false` 时不得为了容纳文字改成多行。
-4. box、非锚点 margin 和来源允许的 wrap 都无法解决，并且实际 preview 确认生成字形比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组字号；不得逐框“减 1pt”试排。
-5. 仍无法容纳时保留为开放 P0/P1 并披露，不得以 AutoFit、overflow、越界、硬换行或图片化掩盖。
-
-统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。当前 schema/compiler 的单个 `overflow` 同时控制水平与垂直 overflow；文字裁切修复必须保持规格原值，不得把 `overflow=true` 或直接写 `horzOverflow|vertOverflow=overflow` 当作保险。只有用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit 或分轴 overflow。
-
-### 普通视图验证门禁
-
-首次 preview 在普通视图检查每个 TextBox 的首字符、末字符、粗体/数字/英文/标点、来源行数、意外换行、扩框重叠、字号和视觉锚点。悬停或双击后显示完整不能算通过；任一可见裁切或新增 P0/P1 都不得写视觉通过终态。预览不可用时遵守当前 profile 的草稿交付合同，但必须披露文字视觉完整性未验证，不得宣称裁切问题已经解决。
+统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。当前 schema/compiler 的单个 `overflow` 同时控制水平与垂直 overflow；文字裁切修复必须保持规格原值，不得把 `overflow=true` 或直接写 `horzOverflow|vertOverflow=overflow` 当作保险。只有固定框无法在不破坏来源布局的前提下容纳文字、且用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit 或分轴 overflow；这不属于当前页面的 preview 后补丁。
 
 ### 裁切处理速查
 
-| 场景 | 一线处理 | 仍失败时 | 不要做 |
+| 症状 | 一线修复 | 仍失败时 | 不要做 |
 |---|---|---|---|
-| 自由、水平、`wrap=false`、`left|right|center` | 按 alignment 扩到完整安全跨度并重算 mapping | 普通视图检查边界盘点是否遗漏硬障碍 | 固定加 `0.5em/1.0em`、测字、改字号 |
-| 有可见容器或邻近前景障碍 | 扩到容器内部/硬障碍前安全边界 | 非锚点 margin → 来源允许的 wrap → 有实测证据时按比例校准语义组字号 | 越界、清零全部 margin、逐框减 `1pt` |
-| `wrap=true` 且换行与来源一致 | 保持原框宽度与换行 | 实际裁切时进入受限分支 | 套用自由单行公式 |
-| 锚点侧 glyph overhang | 外框与同侧 margin 等量扩展 | 合入唯一集中修复复核 | 把 overhang 当末字容量不足 |
+| 自由文本末端容量不足 | 按 alignment 扩展非锚点方向并重算 mapping | 同方向安全区最多提高到 `1.0em` | overflow、测字、改字号 |
+| 锚点侧 glyph overhang | 外框与同侧 margin 等量扩展 | 合入唯一集中修复复核 | 把 overhang 当容量不足 |
+| 受限容器容量不足 | box → 非锚点 margin → 来源允许的 wrap | 实测字形偏大时按比例校准语义组字号 | 清零全部 margin、逐框减 `1pt` |
 | 编辑态完整、普通视图裁切 | 按固定框容量问题处理 | 普通视图 preview 判定 | 以悬停/双击态判通过 |
 
 ## 行距、段距与框内垂直位置

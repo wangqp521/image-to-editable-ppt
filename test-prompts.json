@@ -1,27 +1,17 @@
 [
   {
-    "id": "free-left-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的左对齐自由文本。原始可见文字框 source_bbox=[100,60,240,32]，所属水平安全跨度已经盘点为 [100,620]，20pt，多 Text Run，右侧没有前景障碍。请给出首次构建采用的最终 source_bbox，并说明哪些排版属性保持不变。",
-    "expected": "最终 source_bbox 为 [100,60,520,32]；左锚点及 y/h 不变，margins、字号、Text Run、wrap 和 overflow 不变；不使用固定 0.5em 补偿。"
+    "id": "composite-illustration-overlap",
+    "prompt": "你正在把一页 16:9 幻灯片截图转为可编辑 PPTX，使用 rapid 模式。中央视觉主体由盾牌轮廓、齿轮、数据库和多段电路线构成，右侧五个流程框及编号圆点局部遮挡盾牌；流程标签必须可编辑。项目时间紧，用户又希望尽量可编辑。请先只给出 representation plan、事实拆分、提取入口与失败后的处理顺序，不实际生成文件。",
+    "expected": "把复合插画与流程框/标签拆成不同事实；插画选择最小局部 picture，优先使用多 foreground seed 的 extract_picture_asset.py；流程框、编号和文字保持 native。不得因为追求全可编辑或局部提取失败而用基础 Shape 近似重画插画。"
   },
   {
-    "id": "free-right-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的右对齐自由文本。原始 source_bbox=[700,80,200,32]，已确认安全跨度为 [480,900]。请给出最终 source_bbox 和必须保持的锚点。",
-    "expected": "最终 source_bbox 为 [480,80,420,32]；原始右边界 900 保持不变，y/h、margins、字号、wrap 和 overflow 不变。"
+    "id": "simple-native-flowchart",
+    "prompt": "把一张仅由矩形、圆角矩形、圆形、直线箭头和普通文字组成的流程图截图转为可编辑 PPTX。所有轮廓、颜色和连接关系都能由当前原生对象准确表达。请先只给出 representation plan 和理由，不实际生成文件。",
+    "expected": "文字、基础图形和连接线全部选择 native 或必要的 composite；不应为了统一流程而图片化，也不应创建最小局部 picture。"
   },
   {
-    "id": "free-center-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的居中标题。原始 source_bbox=[400,50,200,40]，中心为 500，已确认安全跨度为 [220,780]。请给出最终 source_bbox。",
-    "expected": "最终 source_bbox 为 [220,50,560,40]；文本框中心 500、y/h、margins、字号、wrap 和 overflow 保持不变。"
-  },
-  {
-    "id": "constrained-card-fallback",
-    "prompt": "使用 image-to-editable-ppt 处理卡片内的左对齐单行文字。文字原始 source_bbox=[130,120,220,30]，卡片内部可用范围为 [120,500]，右侧前景图标与编辑安全间隔共同形成 safe_right=438；原图 wrap=false。请给出一线处理以及仍不足时的处理顺序。",
-    "expected": "先扩展到 [130,120,308,30]，不得越过 safe_right；仍不足时只回收右 margin；原图 wrap=false 因而不得改成换行；仅在确认生成字形偏大时按比例调整同一语义组字号；不得 AutoFit、overflow、清空全部 margin 或转图片。"
-  },
-  {
-    "id": "wrapped-text-no-free-expansion",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框但 wrap=true 的两行说明文字，原始 source_bbox=[160,260,320,86]，当前换行与原图一致，左右还有空白。是否应套用自由单行文字的安全跨度扩框？请给出处理结论。",
-    "expected": "不得套用自由单行公式；保持原始宽度和换行结构，只有出现实际裁切且来源布局允许时才按受限文字规则处理。"
+    "id": "mixed-artwork-and-labels",
+    "prompt": "把一页包含手绘长弯箭头、渐变光效、复合装饰线稿、数据标签和说明文字的截图转为可编辑 PPTX。装饰与部分标签邻近，个别轮廓由多个断开的部件构成。请先只给出 representation plan、最小图片边界原则以及分离失败时的处理方式，不实际生成文件。",
+    "expected": "复杂视觉主体按语义单元拆成非图标局部 picture，断开部件使用多个 foreground seed；数据标签和说明文字独立 native。若稳定分离失败，保留更大的最小局部 picture 或记录限制，禁止退化为近整页图片或低保真 Shape 重绘。"
   }
 ]
