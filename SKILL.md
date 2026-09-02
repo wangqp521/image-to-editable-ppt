@@ -7,13 +7,15 @@ description: Use when converting one or more uploaded images, screenshots, expor
 
 ## 核心原则
 
-把输入图片高保真复刻为可编辑 16:9 PPTX。事实正确优先于视觉高保真，视觉高保真优先于主要内容可编辑；禁止美化、自动平均、补造内容和整页图片化。普通文字、基础图形、表格、连接线与图表应原生可编辑；照片、Logo、图标、插画、纹理、艺术字和复杂装饰只保留为当页最小局部 picture。
+把输入图片高保真复刻为可编辑 16:9 PPTX。事实正确优先于视觉高保真，视觉高保真优先于主要内容可编辑；禁止美化、自动平均、补造内容和整页图片化。普通文字与当前合同能够准确表达的图形、表格、连接关系和简单图表保持内容级原生可编辑；已有图片素材、独立图标与无法准确原生表达的视觉内容只保留为当页最小局部 picture。
+
+每个非背景元素在全页盘点后必须读取[元素表达分类](references/element-representation.md)，按“主要文字分离 → 已有图片素材 → 独立图标 → 准确原生表达 → 最小局部 picture”的固定顺序逐个分类，首个命中项即为终态。不得以时间、对象数量、拆分可行性或整体相似为由跳步或改类。
 
 默认采用草稿优先的 `rapid`：先生成并完成与当前 PPTX 哈希绑定的 structure、background 验证，LibreOffice 只做一次可选、非阻断预览。字体回退、LibreOffice `SIGABRT`、缺少 Poppler 或预览失败都不得阻止交付已通过两项验证的可编辑草稿。
 
 schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口。精简流程不得削弱 Text Run、Paragraph、原生 bullet、表格 merge、connector、crop、background 与 OOXML 安全规则。
 
-无法由当前原生对象准确表达、且 `required_editability=labels_only|none` 的复杂装饰，使用[图片与图标](references/pictures-and-icons.md)中的“非图标局部透明 picture”入口；元素仍为 `kind=picture`、representation 仍为 `selected_mode=asset`，不得冒充图标或扩展新元素类型。
+按照[元素表达分类](references/element-representation.md)判定为非图标最小局部 picture，且 `required_editability=labels_only|none` 的视觉内容，根据[图片与图标](references/pictures-and-icons.md)选择普通 picture 或“非图标局部透明 picture”入口；元素仍为 `kind=picture`、representation 仍为 `selected_mode=asset`，不得冒充图标或扩展新元素类型。
 
 ## 验证模式
 
@@ -32,7 +34,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 ## 页面规格
 
-每页维护 `prepare_spec.py`、`work/page-reconstruction.json` 与当前 `work/page.pptx`。展示 source 与 coordinate overlay 后，一次盘点全部元素和关系，把明确的点与框合并为一次批量测量。页面专用 Python 可使用局部函数、数组、推导式和循环生成完整 schema v2；不得创建第二套 IR 或直接修改生成的 JSON。
+每页维护 `prepare_spec.py`、`work/page-reconstruction.json` 与当前 `work/page.pptx`。展示 source 与 coordinate overlay 后，一次盘点全部元素和关系，盘点后按[元素表达分类](references/element-representation.md)逐元素固定 representation，再把明确的点与框合并为一次批量测量。页面专用 Python 可使用局部函数、数组、推导式和循环生成完整 schema v2；不得创建第二套 IR 或直接修改生成的 JSON。
 
 文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
 
@@ -44,6 +46,7 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 | 页面条件 | 必读 reference |
 |---|---|
+| 每个非空页面 | [元素表达分类](references/element-representation.md) |
 | 每个非空页面 | [测量与布局](references/measurement-and-layout.md) |
 | 普通/特殊文字、列表、表格文字 | [文字与可编辑性](references/text-and-editability.md) |
 | 表格、矩阵、状态条、图示、连接线或图表 | [图形与图示](references/graphics-and-diagrams.md) |

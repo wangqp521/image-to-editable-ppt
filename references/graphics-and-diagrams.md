@@ -2,9 +2,13 @@
 
 `modules.graphics/diagram/chart` 引用 v2 `element_id`，禁填 OOXML ID；存数/bbox/结构/样式/层级/可编辑性。
 
-当前 native：文字、rectangle/roundRect/ellipse/triangle/chevron/rightArrow、线、表格、matrix/status、picture/icon，以及满足封闭合同的简单 2D `pie|doughnut|column|bar|line`；multipart 用 `composite` parts/repeat，不建 IR。自由曲线、其他 preset 和超出首期合同的复杂图表不原生构建；`required_editability=full|labels_and_geometry` 禁 asset fallback，prebuild 失败即停。`parts/repeat_sequence` 默认禁重叠；仅源图确有重叠且各 part bbox/层级忠实时，父 element `content.allow_overlap=true`；禁为绕错改 bbox、并 parts、滥用开关。
+元素必须先按[元素表达分类](element-representation.md)确定表达类别；本文件只定义内容级原生可编辑的图形、图示与图表合同。`native_editable` 与 `selectable_picture` 是分类术语，不是 schema 字段或新元素类型。
 
-首轮构建时，块状、带面积填充的箭头优先使用 `rightArrow`；细连接关系才使用 line arrow marker。该选择只复用 compiler 已支持表示，不得为规避 renderer 差异改变来源语义、方向或几何。
+当前内容级原生可编辑能力仅包括：文字、`rectangle|roundRect|ellipse|triangle|chevron|rightArrow`、线和当前支持的 connector、表格、matrix/status，以及满足封闭合同的简单 2D `pie|doughnut|column|bar|line`。picture/icon 虽是 PowerPoint 中可独立选择的 Picture 对象，但属于 `selectable_picture`，不属于内容级原生可编辑。自由曲线、其他 preset 和超出首期合同的复杂图表不原生构建；`required_editability=full|labels_and_geometry` 禁 asset fallback，prebuild 失败即停。
+
+multipart 只在每个 part 都对应来源中可辨认的独立视觉部件，且组合后能保持来源轮廓、位置、重叠和层级时，才使用 `composite` parts/repeat，不建第二套 IR。“能够拆成若干 Shape”不等于“能够准确原生表达”；不得使用多个 Shape 近似拼出来源视觉。`parts/repeat_sequence` 默认禁重叠；仅源图确有重叠且各 part bbox/层级忠实时，父 element `content.allow_overlap=true`；禁为绕错改 bbox、并 parts、滥用开关。
+
+只有来源为直线型块状箭头，且轮廓、方向、箭身与箭头比例均能由当前 `rightArrow` 合同准确表达时，才使用 `rightArrow`；细直线连接关系使用 line arrow marker。弯曲、自由曲线或特殊轮廓箭头按元素表达分类使用最小局部 picture。不得为规避 renderer 差异改变来源语义、方向或几何。
 
 ## 表格、矩阵与框线
 

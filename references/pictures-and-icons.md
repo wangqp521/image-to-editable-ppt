@@ -1,5 +1,7 @@
 # 图片与图标
 
+元素必须先按[元素表达分类](element-representation.md)确定为已有图片素材、独立图标或非图标最小局部 picture；本文件只定义这些 Picture 对象的资产生成、绑定与验证合同，不重新分类。
+
 素材只来自当前页 `clean_visual_reference` 或用户原始素材；不得联网、调用 imagegen 生成替代素材、借用其他页资产，或把外部标题/标签并入图片。照片、Logo、插画、纹理和复杂装饰可用独立局部 picture；主要文字、数字和数据仍保持可编辑。满页照片/纹理可作背景，但主要内容不能整页图片化。
 
 只有 representation plan 显式选择 `asset`、`fallback_policy=allow_minimal_asset` 且所需可编辑性为 `labels_only|none` 时，compiler 才接受最小局部 asset fallback；`labels_only` 还须绑定原生可编辑标签。资产必须为绝对、非 symlink 的本地 PNG/JPEG/WEBP，并绑定当前 SHA-256 与像素尺寸；来源 bbox 必须与 picture 完全一致，近整页 asset 永远拒绝。compiler 不自动生成、扩大或替换资产，也不把失败改成 asset 模式。
@@ -12,7 +14,7 @@
 
 ## 图标
 
-图标必须从当前页视觉参考裁切为各自独立 picture，放回原 bbox；简单或复杂图标都不得用 Shape、字符、重绘 SVG 或图标库替代。编号圆点、标签、文字、bullet 和分隔线不是图标，不得混入 `icon_only`。`extract_icon_asset.py` 是唯一图标资产生成入口，每次只处理一个已测量图标；不得编写页面专用裁切脚本，也不增加对象检测、批处理状态机或第二套资产规格。
+只有按元素表达分类确认的独立图标才能进入本节。图标必须从当前页视觉参考裁切为各自独立 picture，放回原 bbox；简单或复杂图标都不得用 Shape、字符、重绘 SVG 或图标库替代。`extract_icon_asset.py` 是唯一图标资产生成入口，每次只处理一个已测量图标；不得编写页面专用裁切脚本，也不增加对象检测、批处理状态机或第二套资产规格。
 
 先在一次全页盘点中固定全部图标 bbox，再并发启动多个独立 extractor 进程。每个进程只读同一 visual，使用唯一 `icon_id`，写唯一 `assets/icons/<icon-id>.png`，且不共享临时文件或输出目录；并发只缩短等待，不改变单图标合同。只重跑失败或前景触边项，其他已通过资产不得重复提取。
 
@@ -23,7 +25,7 @@
 - `standard` 保持原行为，只把与裁切四边 4-connected 连通的同色背景写为透明。开放线框内部与外部连通的同色背景默认透明，封闭区域内未与外部连通的底色保持不透明。
 - 仅当局部上下文明确显示“彩色背景上的白色/近白色反白镂空线框图标”时，尤其是靶心、放大镜、盾牌等存在闭合孔洞的白色线框，显式使用 `reverse-white-outline`。该配置排除边框中的白色/近白色前景后学习彩色背景，保护白色/近白色像素，并把全裁块内匹配的同源背景写为透明，因此闭合线框内部的彩色底也会透明。
 
-`reverse-white-outline` 的 bbox 必须同时包含完整白色线框和少量可识别的彩色背景边距；白底、无彩色背景边距、白色前景触边或场景不明确时失败，不得猜测、扩大颜色范围或转用该配置。普通彩色/填充图标、白底图标、照片、Logo 和包含多色语义的图标保持 `standard`。图标本体、阴影、抗锯齿和所有小部件不做删除、重绘、改色或羽化。输出必须为同时含透明背景和可见前景的 RGBA PNG，前景不得触边，并保存 alpha channel hash。
+`reverse-white-outline` 的 bbox 必须同时包含完整白色线框和少量可识别的彩色背景边距；白底、无彩色背景边距、白色前景触边或场景不明确时失败，不得猜测、扩大颜色范围或转用该配置。普通彩色/填充图标、白底图标和包含多色语义的图标使用 `standard`；照片和 Logo 不属于图标裁切对象，继续使用普通 `kind=picture`。图标本体、阴影、抗锯齿和所有小部件不做删除、重绘、改色或羽化。输出必须为同时含透明背景和可见前景的 RGBA PNG，前景不得触边，并保存 alpha channel hash。
 
 ```bash
 python3 scripts/extract_icon_asset.py source.png \
@@ -43,11 +45,11 @@ python3 scripts/extract_icon_asset.py source.png \
 
 ## 非图标图片
 
-普通照片、Logo、截图和已有透明素材继续作为普通 `kind=picture` 使用。当前 renderer 只实现既有 picture asset、`mode`、四边 crop、rotation 与 opacity；不要在规格中声明尚未实现的 mask、圆角、reflection、glow 或 picture fill 扩展。
+普通照片、Logo、截图、纹理和已有透明素材继续作为普通 `kind=picture` 使用，不得进入 `extract_icon_asset.py`。当前 renderer 只实现既有 picture asset、`mode`、四边 crop、rotation 与 opacity；不要在规格中声明尚未实现的 mask、圆角、reflection、glow 或 picture fill 扩展。
 
 ### 非图标局部透明 picture
 
-长弯箭头、飘带、光效、手绘线条等复杂装饰，如果当前原生 shape/line/connector 无法准确表达，且 representation plan 已选择 `selected_mode=asset`、`fallback_policy=allow_minimal_asset`、`required_editability=labels_only|none`，可从当前页 `clean_visual_reference` 的明确局部 bbox 中提取为透明 PNG。它是“复杂装饰的局部 picture”，不是图标；element 保持 `kind=picture`，输出固定写入当页 `assets/pictures/<picture-id>.png`。
+长弯箭头、自由曲线、无法准确原生表达的复合线稿、飘带、光效、手绘线条等非图标视觉内容，如果 representation plan 已选择 `selected_mode=asset`、`fallback_policy=allow_minimal_asset`、`required_editability=labels_only|none`，可从当前页 `clean_visual_reference` 的明确局部 bbox 中提取为透明 PNG。它是“非图标局部透明 picture”；element 保持 `kind=picture`，输出固定写入当页 `assets/pictures/<picture-id>.png`。
 
 `extract_picture_asset.py` 是该类资产的唯一生产入口。bbox 使用来源像素坐标 `[x,y,w,h]`，必须包含目标完整轮廓和少量可学习的周边背景；每个 `--foreground-seed` 是来源坐标中的目标前景点。目标包含多个彼此断开的部件时，为每个需保留的部件重复提供一个 seed。脚本复用图标入口已有的边缘连通背景识别，只保留 seed 所在的 8-connected 前景部件；来源裁块的 RGB 逐像素保持不变，只修改 alpha。
 
