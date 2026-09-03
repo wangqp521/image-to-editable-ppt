@@ -858,7 +858,7 @@ _RECORDS: dict[str, dict[str, Any]] = {
                     "alignment": "left",
                     "vertical_alignment": "top",
                     "wrap": False,
-                    "overflow": False,
+                    "overflow": True,
                     "soft_breaks": [],
                     "paragraph_breaks": [],
                 },

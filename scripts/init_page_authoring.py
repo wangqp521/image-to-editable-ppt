@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-TEMPLATE_VERSION = "copy-v1-schema-v2"
+TEMPLATE_VERSION = "copy-v2-schema-v2"
 PAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 PROFILE_VALUES = {"rapid", "reviewed"}
 TEMPLATE_SPECS = {

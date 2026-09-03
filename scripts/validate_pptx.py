@@ -877,7 +877,7 @@ def _text_object(
     overflow = (
         None
         if vertical_overflow is None and horizontal_overflow is None
-        else "overflow" in {vertical_overflow, horizontal_overflow}
+        else vertical_overflow == "overflow" and horizontal_overflow == "overflow"
     )
     return {
         "slide_part": slide_part, "object_id": object_id, "object_name": name,
@@ -889,6 +889,8 @@ def _text_object(
             "vertical_alignment": _vertical_alignment(anchor),
             "wrap": None if wrap_value is None else wrap_value != "none",
             "overflow": overflow,
+            "horizontal_overflow": horizontal_overflow,
+            "vertical_overflow": vertical_overflow,
             "soft_breaks": soft_breaks,
             "paragraph_breaks": paragraph_breaks,
         },
@@ -3128,6 +3130,32 @@ def _validate_text_run_contracts(
             result["warnings"].append(
                 f"{element_id}: vertical alignment expected {expected_vertical!r}, "
                 f"got {actual_vertical!r}"
+            )
+        expected_overflow = (
+            expected_text_box.get("overflow")
+            if isinstance(expected_text_box, dict)
+            else None
+        )
+        actual_horizontal_overflow = (
+            actual_text_box.get("horizontal_overflow")
+            if isinstance(actual_text_box, dict)
+            else None
+        )
+        actual_vertical_overflow = (
+            actual_text_box.get("vertical_overflow")
+            if isinstance(actual_text_box, dict)
+            else None
+        )
+        if (
+            expected_overflow is not True
+            or actual_horizontal_overflow != "overflow"
+            or actual_vertical_overflow != "overflow"
+        ):
+            result["errors"].append("TEXT_BOX_OVERFLOW_MISMATCH")
+            result["warnings"].append(
+                f"{element_id}: expected explicit horizontal and vertical overflow, "
+                f"got horzOverflow={actual_horizontal_overflow!r}, "
+                f"vertOverflow={actual_vertical_overflow!r}"
             )
         text = item.get("text")
         if not isinstance(text, str):

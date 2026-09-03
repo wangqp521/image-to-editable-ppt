@@ -488,7 +488,7 @@ class AuthoringPage:
                 "alignment": alignment,
                 "vertical_alignment": vertical_alignment,
                 "wrap": wrap,
-                "overflow": False,
+                "overflow": True,
                 "soft_breaks": [],
                 "paragraph_breaks": [paragraph["end"] for paragraph in paragraphs[:-1]],
             },

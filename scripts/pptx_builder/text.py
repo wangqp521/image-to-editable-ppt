@@ -177,9 +177,8 @@ def apply_text_contract(
     text_frame.word_wrap = text_box["wrap"]
     text_frame.vertical_anchor = _VERTICAL_ALIGNMENTS[text_box["vertical_alignment"]]
     body_properties = text_frame._txBody.bodyPr
-    overflow = "overflow" if text_box.get("overflow") is True else "clip"
-    body_properties.set("vertOverflow", overflow)
-    body_properties.set("horzOverflow", overflow)
+    body_properties.set("vertOverflow", "overflow")
+    body_properties.set("horzOverflow", "overflow")
     for index, paragraph_contract in enumerate(contract["paragraphs"]):
         paragraph = (
             text_frame.paragraphs[0]
@@ -340,6 +339,11 @@ class TextRenderer:
                 f"modules.typography.items.{element_id}.text_box.wrap",
                 "TextBox wrap must be boolean",
                 "text.frame.wrap",
+            )]
+        if text_box.get("overflow") is not True:
+            return [_issue(
+                f"modules.typography.items.{element_id}.text_box.overflow",
+                "ordinary typography TextBox overflow must be true",
             )]
         if text_box.get("vertical_alignment") not in _VERTICAL_ALIGNMENTS:
             return [_issue(

@@ -3194,7 +3194,7 @@
               "right": 0,
               "top": 0
             },
-            "overflow": false,
+            "overflow": true,
             "paragraph_breaks": [],
             "soft_breaks": [],
             "vertical_alignment": "top",
@@ -3465,5 +3465,5 @@
   "description": "Structural schema contract only; semantic, path/hash, representation, renderer, visual, and final gates remain authoritative in public CLIs.",
   "title": "Editable PPT page reconstruction schema v2",
   "x-schema-contract-id": "page-reconstruction-v2",
-  "x-schema-contract-sha256": "932ed86f8753fa23bf6d9fb771dc2cc38374caa691d3fb69e6353c5663306746"
+  "x-schema-contract-sha256": "7cf93a43dabd873386649237cee495d6898c91184c4e3f0dc36f10d2d2128e46"
 }

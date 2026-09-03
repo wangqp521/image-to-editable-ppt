@@ -1013,6 +1013,13 @@ def _validate_typography(
                 f"{path}.text_box",
                 errors,
             )
+            if text_box.get("overflow") is not True:
+                _error(
+                    errors,
+                    "SPEC_TEXT_BOX_OVERFLOW_DISABLED",
+                    f"{path}.text_box.overflow",
+                    "ordinary typography TextBox overflow must be true",
+                )
         _validate_paragraphs(
             item.get("paragraphs"),
             text,

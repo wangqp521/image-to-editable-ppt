@@ -67,7 +67,7 @@ def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
     return [center - half, y, 2 * half, height]
 ```
 
-扩框后必须同时满足：`y/h` 不变；对应 alignment 锚点精确不变；新框位于安全跨度内；左右 margins、字号、字体、字距、Paragraph、Text Run、wrap、overflow 和垂直对齐不变。element `source_bbox` 写扩展后的 source 框，再由 canvas mapping 生成 `slide_bbox`，并与 typography `text_box` 完全同步；原始可见字形框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID` 或 `SPEC_TEXT_BOX_MAPPING_INVALID`。
+扩框后必须同时满足：`y/h` 不变；对应 alignment 锚点精确不变；新框位于安全跨度内；左右 margins、字号、字体、字距、Paragraph、Text Run、wrap 和垂直对齐不变；普通 `kind=text` typography TextBox 的 `overflow` 始终为 `true`。element `source_bbox` 写扩展后的 source 框，再由 canvas mapping 生成 `slide_bbox` 并与 typography `text_box` 完全同步；原始可见字形框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID` 或 `SPEC_TEXT_BOX_MAPPING_INVALID`。
 
 如果容量已经足够、只有对齐锚点一侧的 glyph overhang 被外框裁切，则只在该侧扩展外框并给同侧 margin 增加等量，保持文字锚点和 `usable_width` 不变；不得把这条规则用于末字容量不足。
 
@@ -81,9 +81,9 @@ def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
 2. 仍不足时，只回收不承担视觉锚点的 margin：`left` 只动右侧、`right` 只动左侧、`center` 左右等量；不得清零全部 margins。
 3. 来源本来允许自动换行时才调整 wrap；来源 `wrap=false` 时不得为了容纳文字改成多行。
 4. box、非锚点 margin 和来源允许的 wrap 都无法解决，并且实际 preview 确认生成字形比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组字号；不得逐框“减 1pt”试排。
-5. 仍无法容纳时保留为开放 P0/P1 并披露，不得以 AutoFit、overflow、越界、硬换行或图片化掩盖。
+5. 仍无法在安全边界内容纳时保留为开放 P0/P1 并披露；`overflow=true` 只保证文字不被 TextBox 裁掉，不能把越界、重叠、硬换行或图片化变成可接受结果。
 
-统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。当前 schema/compiler 的单个 `overflow` 同时控制水平与垂直 overflow；文字裁切修复必须保持规格原值，不得把 `overflow=true` 或直接写 `horzOverflow|vertOverflow=overflow` 当作保险。只有用户另行授权扩展 schema/compiler 能力时，才单独评估 AutoFit 或分轴 overflow。
+统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。普通 `kind=text` typography TextBox 从首次 spec 起必须写 `overflow=true`，compiler 显式写入 `horzOverflow=overflow` 与 `vertOverflow=overflow`；prebuild、renderer contract 和 structure validation 任一发现 `false`、`clip`、缺失或分轴不一致均 fail closed。该安全网只保证 PowerPoint 不隐藏框外文字，安全跨度、容器边界、非锚点 margin、来源允许的 wrap、字号与视觉锚点规则全部继续生效；可见文字越过合理边界、离开页面或与相邻元素重叠仍是 P0/P1。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。本规则只调整普通 typography TextBox，不改变表格单元格、图表、matrix/status、图片、图标或背景的既有合同，也不新增分轴 schema 字段。
 
 ### 普通视图验证门禁
 
