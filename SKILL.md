@@ -34,9 +34,17 @@ schema v2 是唯一 Layout IR，`build_pptx_from_spec.py` 是唯一构建入口�
 
 ## 页面规格
 
-每页维护 `prepare_spec.py`、`work/page-reconstruction.json` 与当前 `work/page.pptx`。展示 source 与 coordinate overlay 后，一次盘点全部元素和关系，盘点后按[元素表达分类](references/element-representation.md)逐元素固定 representation，再把明确的点与框合并为一次批量测量。页面专用 Python 可使用局部函数、数组、推导式和循环生成完整 schema v2；不得创建第二套 IR 或直接修改生成的 JSON。
+新页面先使用复制式模板，从 Skill 根目录复制自包含 authoring 脚本；`SOURCE_PATH`、`PAGE_DIR` 和 `PAGE_ID` 必须替换成当前页的实际路径和 ID：
 
-文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须修改 `prepare_spec.py` 并重新生成。
+```bash
+python3 scripts/init_page_authoring.py --source SOURCE_PATH --page-dir PAGE_DIR --page-id PAGE_ID --profile rapid
+```
+
+初始化必须早于页面事实编写。禁止以历史任务中的 `prepare_spec.py`、`finalize_spec.py` 或旧 Schema 示例作为脚手架；复制后的页面脚本不得导入共享 authoring helper。每页维护复制得到的 `prepare_spec.py`、`finalize_spec.py`、`work/page-reconstruction.json` 与当前 `work/page.pptx`。
+
+展示 source 与 coordinate overlay 后，一次盘点全部元素和关系，盘点后按[元素表达分类](references/element-representation.md)逐元素固定 representation，再把明确的点与框合并为一次带语义 ID 的批量测量。只编辑 `prepare_spec.py` 的 `PAGE FACTS` 区；稳定前置区和稳定装配区负责确定性机械展开。页面事实区可使用局部函数、数组、推导式和循环，生成的 schema v2 仍是唯一 Layout IR。不得创建第二套 IR；不得直接修改生成的 JSON。
+
+文字按来源 TextBox 一次转录为 `paragraphs_text`，主体样式覆盖全文，`spans` 只声明真实存在的局部样式差异。视觉或结构修复必须只修改 `prepare_spec.py` 的 `PAGE FACTS` 并重新生成。
 
 首次构建不得把可预防的文字裁切留到 preview 后。普通视图裁切、仅在鼠标悬停或双击编辑态显示完整，说明文字仍在 OOXML 中但固定 TextBox 容量不足，不能视为内容缺失或验证通过。所有无填充、无边框、水平、`wrap=false` 且 `alignment=left|right|center` 的自由单行文字，不再先判断“高风险”或固定增加 `0.5em/1.0em`；必须根据现有元素盘点确定所属水平通道的 `safe_left/safe_right`，按 alignment 扩展到安全跨度：`left` 保持左锚点并扩到 `safe_right`，`right` 保持右锚点并扩到 `safe_left`，`center` 保持中心并对称扩展。先改 `source_bbox`，再用既有 mapping 重算 `slide_bbox` 并同步 typography `text_box`；保持 y/h、margins、字号、Text Run、换行、overflow 和视觉锚点。`wrap=true`、有可见容器、邻近前景元素、页面硬边界或 `justify|distributed` 等受限文字，依次处理容器内 box、非锚点 margin、来源允许的 wrap，生成字形确实偏大时才按实测比例校准同一语义组字号。裁切修复不得启用 overflow、全局 AutoFit、运行时测字、清零全部 margin 或把文字图片化。preview 必须在普通视图检查首尾字符、意外换行和新增重叠；预览不可用时按当前 profile 标记视觉未验证，不得宣称裁切已解决。精确边界、公式与兜底规则见[文字与可编辑性](references/text-and-editability.md)。
 

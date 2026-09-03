@@ -30,7 +30,7 @@ preview 可用时，主代理执行一次整页语义视觉判断，核对 mappi
 
 ## 基础集中修复
 
-最多一次基础集中修复：按共同根因只集中修改 `prepare_spec.py` 一次；从 prebuild 起重跑 build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。不得复用旧哈希报告，也不得逐问题反复构建。
+最多一次基础集中修复：按共同根因只修改 `prepare_spec.py` 的 `PAGE FACTS` 一次；从 `prepare_spec.py` 和 prebuild 起重跑规格生成、build、structure、background，并为新 PPTX 哈希最多尝试一次 preview。不得直接修改生成的 JSON，不得复用旧哈希报告，也不得逐问题反复构建。
 
 新 preview 可用时，主代理执行一次修复后终局语义复核，检查旧问题是否关闭以及是否新增 P0/P1。该终局复核不得触发第二次修复、再次渲染或 reviewed Final。无开放 P0/P1 时写 `rapid_validated`；仍有 P0/P1 或新 preview 不可用时写 `rapid_validation_failed`。只要硬门禁仍通过，失败后仍继续交付 draft。
 

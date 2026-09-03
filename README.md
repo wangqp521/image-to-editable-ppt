@@ -26,6 +26,20 @@
 
 同一批图片使用一种模式；未指定时采用 `rapid`，需要额外视觉审查时请明确指定 `reviewed`。
 
+## 新页面规格初始化
+
+执行者从 Skill 根目录为每页复制自包含规格脚本；命令不会覆盖已有 `prepare_spec.py` 或 `finalize_spec.py`：
+
+```bash
+python3 scripts/init_page_authoring.py \
+  --source /absolute/path/source.png \
+  --page-dir /absolute/path/page-001 \
+  --page-id page-001 \
+  --profile rapid
+```
+
+随后在一次全页盘点后使用 `--point-id/--bbox-id` 批量测量，并只填写复制脚本的 `PAGE FACTS`。坐标、唯一 Layout IR 和修复规则见 [references/measurement-and-layout.md](references/measurement-and-layout.md)。
+
 ## 使用方式
 
 ### 单页
