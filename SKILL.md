@@ -46,4 +46,6 @@ python3 scripts/init_page_authoring.py --source SOURCE_PATH --page-dir PAGE_DIR 
 
 ## 多页与交付
 
+结构验证的 `--output` 始终是包含 `structure_objects` 和 `picture_objects` 的完整证据；`--summary` 只精简 stdout，不得将重定向得到的 summary 用作 background 输入。background 遇到 summary 必须以 `STRUCTURE_REPORT_INCOMPLETE` 单一错误停止，不得自行补造对象证据。
+
 逐页执行；单页失败时保留诊断并继续后页，不得让一页覆盖另一页的状态或证据。合并资格、命令、验证和交付披露只按当前 profile reference 执行。

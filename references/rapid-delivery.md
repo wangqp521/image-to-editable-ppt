@@ -20,7 +20,11 @@ preview 可按需对当前 PPTX 哈希尝试一次：
 python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans GB" --output-dir preview/PPTX_SHA256
 ```
 
+在 macOS Codex Desktop 中，上述首次且唯一一次 preview 必须直接请求对这条固定渲染命令的非沙箱执行，以便 LibreOffice 完成 macOS ApplicationServices 注册；这是执行环境选择，不是 runtime preflight。未获得授权时不先在沙箱内试跑，而是记录 `PREVIEW_EXECUTION_NOT_AUTHORIZED` 并按 preview 不可用处理。其他平台保持普通执行。
+
 `PPTX_SHA256` 必须替换为当前 PPTX 的实际哈希，preview 文件的直接父目录必须正是该哈希。同一 PPTX 哈希最多尝试一次。command error、`SIGABRT`、无 PDF/preview 或 Poppler 缺失时不 preflight、不重试、不切换 locale/fontconfig、不换字体、不重建，写 `rapid_validation_failed`；只要硬门禁仍通过，继续交付可编辑草稿。
+
+macOS 在未产生 PDF 前返回 `-SIGABRT` 时，诊断必须写 `RENDER_MACOS_APPLICATION_REGISTRATION_FAILED`，明确这是渲染器启动环境失败，不是 PPTX 内容失败。
 
 preview 可用时，主代理执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1；文字检查项与通过条件只按[文字与可编辑性](text-and-editability.md)的“普通视图验证门禁”。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 时写 `rapid_validation_failed`；全部 P0/P1 可修复时进入唯一一次基础集中修复。字体 fallback、`pdffonts` mismatch 或 `matched=false` 本身只作诊断，只有造成可见版式差异时才列为视觉问题。
 

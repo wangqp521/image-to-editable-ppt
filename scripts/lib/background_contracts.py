@@ -1379,6 +1379,31 @@ def _postbuild_binding_issues(
     return issues
 
 
+def _structure_report_evidence_issue(
+    structure_report: dict[str, Any],
+) -> dict[str, str] | None:
+    """Reject display summaries before they cascade into background defects."""
+    complete_arrays = all(
+        isinstance(structure_report.get(field), list)
+        and all(isinstance(value, dict) for value in structure_report[field])
+        for field in ("structure_objects", "picture_objects")
+    )
+    if (
+        structure_report.get("evidence_level") == "summary"
+        or structure_report.get("usable_as_background_evidence") is False
+        or not complete_arrays
+    ):
+        return _postbuild_issue(
+            "STRUCTURE_REPORT_INCOMPLETE",
+            "structure_report",
+            (
+                "background validation requires complete structure_objects "
+                "and picture_objects arrays"
+            ),
+        )
+    return None
+
+
 def _typed_snapshot_facts(
     structure_report: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
@@ -1580,6 +1605,13 @@ def validate_background_postbuild(
     pptx_facts, pptx_issues = _postbuild_pptx_identity(pptx_path)
     report["pptx_sha256"] = pptx_facts["pptx_sha256"]
     identities = {**input_facts, **pptx_facts}
+    structure_evidence_issue = _structure_report_evidence_issue(loaded_structure)
+    if structure_evidence_issue is not None:
+        for issue in [*input_issues, *pptx_issues, structure_evidence_issue]:
+            _append_postbuild_issue(
+                report, None, issue["code"], issue["path"], issue["detail"]
+            )
+        return report
     for issue in [
         *input_issues,
         *pptx_issues,

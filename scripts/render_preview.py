@@ -389,6 +389,15 @@ def render_preview(
                         or pdf_path.stat().st_size == 0
                     )
                 )
+                if not strict_runtime and macos_sigabrt_without_pdf:
+                    raise RenderError(
+                        "RENDER_MACOS_APPLICATION_REGISTRATION_FAILED",
+                        (
+                            "LibreOffice aborted before producing a PDF; "
+                            "run the first preview outside the macOS sandbox"
+                        ),
+                        returncode=exc.returncode,
+                    ) from exc
                 if strict_runtime and macos_sigabrt_without_pdf and attempt_count == 1:
                     if _sha256(pptx) != initial_pptx_hash:
                         raise RenderError("RENDER_INPUT_CHANGED", str(pptx)) from exc

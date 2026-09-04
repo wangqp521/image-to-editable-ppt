@@ -147,6 +147,8 @@ def _file_sha256(path: Path) -> str:
 
 def _result(path: Path) -> dict[str, Any]:
     return {
+        "evidence_level": "full",
+        "usable_as_background_evidence": True,
         "path": str(Path(path).expanduser().resolve()),
         "pptx_sha256": None,
         "valid": False,
@@ -4110,6 +4112,8 @@ def summary_result(result: dict[str, Any]) -> dict[str, Any]:
         "structure_objects",
     }
     summary = {key: value for key, value in result.items() if key not in verbose_keys}
+    summary["evidence_level"] = "summary"
+    summary["usable_as_background_evidence"] = False
     summary["slides"] = [
         {key: value for key, value in slide.items() if key != "picture_objects"}
         for slide in result.get("slides", [])
@@ -4117,9 +4121,19 @@ def summary_result(result: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
-def _emit_json(payload: dict[str, Any], output: Path | None) -> None:
+def _emit_json(
+    payload: dict[str, Any],
+    output: Path | None,
+    *,
+    output_payload: dict[str, Any] | None = None,
+) -> None:
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     if output is not None:
+        output_text = json.dumps(
+            output_payload if output_payload is not None else payload,
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n"
         output.parent.mkdir(parents=True, exist_ok=True)
         handle = tempfile.NamedTemporaryFile(
             mode="w",
@@ -4132,7 +4146,7 @@ def _emit_json(payload: dict[str, Any], output: Path | None) -> None:
         temp_path = Path(handle.name)
         try:
             with handle:
-                handle.write(text)
+                handle.write(output_text)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_path, output)
@@ -4159,18 +4173,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--summary",
         action="store_true",
-        help="omit per-object arrays from CLI JSON output",
+        help="omit per-object arrays from stdout; --output always saves full evidence",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        help="atomically save the same JSON emitted to stdout",
+        help="atomically save the complete structure evidence JSON",
     )
     args = parser.parse_args(argv)
     result = validate_pptx(
         args.pptx, args.expected_slides, args.spec, args.build_report
     )
-    _emit_json(summary_result(result) if args.summary else result, args.output)
+    _emit_json(
+        summary_result(result) if args.summary else result,
+        args.output,
+        output_payload=result,
+    )
     return 0 if result["valid"] else 2
 
 

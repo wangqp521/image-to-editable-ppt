@@ -8,6 +8,8 @@
 
 当前 PPTX 哈希已有成功 preview 时直接复用；尚未尝试时最多生成一次。当前哈希已因 command error、`SIGABRT`、无 PDF/preview 或 Poppler 缺失而失败时不重试、不 preflight、不换字体、不重建，写 `reviewed_failed` 并交付合格草稿。字体 fallback 本身不构成 P0/P1，只有可见裁切、错误换行、溢出或层级差异才评级。
 
+在 macOS Codex Desktop 中，首次且唯一一次 preview 直接请求对固定 `render_preview.py` 命令的非沙箱执行；未获得授权时不先在沙箱内试跑，记录 `PREVIEW_EXECUTION_NOT_AUTHORIZED` 并写 `reviewed_failed`。未产生 PDF 前的 `-SIGABRT` 统一写 `RENDER_MACOS_APPLICATION_REGISTRATION_FAILED`；不因错误分类变更尝试次数、字体、runtime 或 PPTX。
+
 ## 整页视觉审查
 
 首次七类 coverage 整页审查同时承担基础修复后的终局语义复核，不额外增加一次视觉判断。若共享基础阶段实施了基础修复，该审查同时检查已知问题关闭与新增 P0/P1；若未实施，则直接完成 reviewed 的首次七类判定。
