@@ -1,18 +1,18 @@
 [
   {
     "id": "free-left-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的左对齐自由文本。原始可见文字框 source_bbox=[100,60,240,32]，所属水平安全跨度已经盘点为 [100,620]，20pt，多 Text Run，右侧没有前景障碍。请给出首次构建采用的最终 source_bbox，并说明哪些排版属性保持不变。",
-    "expected": "最终 source_bbox 为 [100,60,520,32]；左锚点及 y/h 不变，margins、字号、Text Run 和 wrap 不变；普通 typography TextBox 从首次 spec 起固定 overflow=true；不使用固定 0.5em 补偿。"
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的左对齐自由文本。来源 TextBox source_bbox=[100,60,240,32]，所属水平安全跨度已盘点为 [100,620]，20pt，多 Text Run，右侧没有前景障碍，也没有普通视图裁切证据。请给出首次构建采用的最终 source_bbox，并说明哪些排版属性保持不变。",
+    "expected": "最终 source_bbox 保持 [100,60,240,32]；不因存在空白安全跨度而默认扩框。左锚点、y/h、margins、字号、字体、Text Run、Paragraph、reading order 和 wrap 不变；普通 typography TextBox 从首次 spec 起固定 overflow=true。"
   },
   {
     "id": "free-right-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的右对齐自由文本。原始 source_bbox=[700,80,200,32]，已确认安全跨度为 [480,900]。请给出最终 source_bbox 和必须保持的锚点。",
-    "expected": "最终 source_bbox 为 [480,80,420,32]；原始右边界 900 保持不变，y/h、margins、字号和 wrap 不变，overflow 固定为 true。"
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的右对齐自由文本。来源 TextBox source_bbox=[700,80,200,32]，已确认安全跨度为 [480,900]，普通视图没有裁切。请给出首次构建的最终 source_bbox 和必须保持的锚点。",
+    "expected": "最终 source_bbox 保持 [700,80,200,32]；原始右边界 900、y/h、margins、字号、字体、Run、Paragraph、reading order 和 wrap 不变，overflow 固定为 true。"
   },
   {
     "id": "free-center-safe-span",
-    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的居中标题。原始 source_bbox=[400,50,200,40]，中心为 500，已确认安全跨度为 [220,780]。请给出最终 source_bbox。",
-    "expected": "最终 source_bbox 为 [220,50,560,40]；文本框中心 500、y/h、margins、字号和 wrap 保持不变，overflow 固定为 true。"
+    "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框、水平、wrap=false 的居中标题。来源 TextBox source_bbox=[400,50,200,40]，中心为 500，已确认安全跨度为 [220,780]，普通视图没有裁切。请给出首次构建的最终 source_bbox。",
+    "expected": "最终 source_bbox 保持 [400,50,200,40]；文本框中心 500、y/h、margins、字号、字体、Run、Paragraph、reading order 和 wrap 保持不变，overflow 固定为 true。"
   },
   {
     "id": "constrained-card-fallback",
@@ -23,5 +23,15 @@
     "id": "wrapped-text-no-free-expansion",
     "prompt": "使用 image-to-editable-ppt 处理一个无填充、无边框但 wrap=true 的两行说明文字，原始 source_bbox=[160,260,320,86]，当前换行与原图一致，左右还有空白。是否应套用自由单行文字的安全跨度扩框？请给出处理结论。",
     "expected": "不得套用自由单行公式；保持原始宽度和换行结构，只有出现实际裁切且来源布局允许时才按受限文字规则处理。"
+  },
+  {
+    "id": "page-edge-observed-overflow",
+    "prompt": "使用 image-to-editable-ppt 处理页面右边缘的左对齐单行文字。来源 TextBox source_bbox=[820,180,160,32]，幻灯片右边界为 1000，wrap=false，overflow=true；普通视图确认生成字形越过页面右边界，但同语义组文字也系统性偏大。是否应向右扩框？给出处理顺序。",
+    "expected": "不得把扩框当作页面越界修复，也不得越过幻灯片边界。先按实测比例校准同一语义组字号；只有来源允许时才启用 wrap；再回收不承担左锚点的右 margin；仍越界则保留开放 P1。保持文字内容、Run、Paragraph、reading order 和 overflow=true。"
+  },
+  {
+    "id": "reader-clips-despite-overflow",
+    "prompt": "一个无填充、无边框、水平、wrap=false 的左对齐自由文本首次构建保持 source_bbox=[220,300,180,30] 且 overflow=true。当前 reader 的普通视图仍明确裁掉末字，逐对象复核确认右侧到 safe_right=520 有连续安全空间，并且最小复测宽度就是 300。是否允许修正 bbox？",
+    "expected": "允许把 bbox 定向扩到 [220,300,300,30]，因为已有 reader 普通视图实际裁切证据；保持左锚点、y/h、margin、字号、字体、Run、Paragraph、reading order、wrap 和 overflow=true，并同步 source_bbox、slide_bbox 与 typography text_box。该修正只适用于此对象/同根因对象，不恢复全局默认扩框。"
   }
 ]

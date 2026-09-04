@@ -8,7 +8,7 @@
 
 ## 草稿资格
 
-prebuild、build、structure 和 background 均不传 `--runtime`。structure/background、内容完整性和主要内容可编辑性硬门禁必须全部通过并绑定当前 PPTX 实际 SHA-256；TextBox/Run、图片化范围和 PPTX 可打开性也必须满足硬门禁。
+prebuild、build、structure 和 background 均不传 `--runtime`。structure/background、内容完整性和主要内容可编辑性硬门禁必须全部通过并绑定当前 PPTX 实际 SHA-256；PPTX 可打开性也必须满足硬门禁。TextBox/Run 和图片化范围的具体合同分别服从[文字与可编辑性](text-and-editability.md)与[元素表达分类](element-representation.md)，本文件只判定是否具备 rapid 草稿资格。
 
 任一硬门禁失败时保留诊断并停止当前页面，不能进入视觉判断、草稿交付或合并。硬门禁全部通过后，页面才具备可编辑草稿交付资格。
 
@@ -22,7 +22,7 @@ python3 scripts/render_preview.py work/page.pptx --preferred-font "Hiragino Sans
 
 `PPTX_SHA256` 必须替换为当前 PPTX 的实际哈希，preview 文件的直接父目录必须正是该哈希。同一 PPTX 哈希最多尝试一次。command error、`SIGABRT`、无 PDF/preview 或 Poppler 缺失时不 preflight、不重试、不切换 locale/fontconfig、不换字体、不重建，写 `rapid_validation_failed`；只要硬门禁仍通过，继续交付可编辑草稿。
 
-preview 可用时，主代理执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、换行、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1。文字必须在普通视图完整显示；仅在鼠标悬停或双击编辑态显示完整仍属于固定 TextBox 裁切，不能判为通过。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 时写 `rapid_validation_failed`；全部 P0/P1 可修复时进入唯一一次基础集中修复。字体 fallback、`pdffonts` mismatch 或 `matched=false` 本身只作诊断，只有造成可见裁切、错误换行、溢出或层级差异时才列为视觉问题。
+preview 可用时，主代理执行一次整页语义视觉判断，核对 mapping、区域比例、层级、文字、图形、表格、图表、crop、图片、图标和背景，并一次列全全部 P0/P1；文字检查项与通过条件只按[文字与可编辑性](text-and-editability.md)的“普通视图验证门禁”。没有 P0/P1 时写 `rapid_validated`；存在不可修复 P0/P1 时写 `rapid_validation_failed`；全部 P0/P1 可修复时进入唯一一次基础集中修复。字体 fallback、`pdffonts` mismatch 或 `matched=false` 本身只作诊断，只有造成可见版式差异时才列为视觉问题。
 
 - P0：PPTX 不可用、核心内容缺失、主要内容不可编辑、数据编造。
 - P1：数量、比例、结构、fill、字号/换行、行/段距、框内位置、Text Run、bullet、crop、connector、图表或关键装饰错误。

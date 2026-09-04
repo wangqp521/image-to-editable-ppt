@@ -21,83 +21,58 @@ spans = [
 ]
 ```
 
-```python
-start = text.index("0故障")
-spans = [{"start": start, "end": start + 1, "color": ORANGE}]
-```
-
 不得手工展开完整 `runs[]`，不得使用正则或“所有数字”等内容类别批量推断样式，也不得通过拆框或硬换行规避 Text Run、Paragraph 或排版问题。
 
-## 固定文本框的安全跨度
+## 普通文字框与 overflow
 
-普通视图中部分文字被裁切、仅在鼠标悬停或双击编辑态显示完整时，文字内容和 Text Run 仍然存在；按固定 TextBox 容量不足处理，不拆框、不补字、不图片化。来源的可见字形框用于定位文字，不等于最终 TextBox 容量框；不得把无可见边框的 TextBox 收紧到字形边界。
+来源 TextBox bbox 用于还原文字容器，不等于字形轮廓。不得把无可见边框的 TextBox 收紧到 OCR/glyph 边界，也不得为了预防裁切把它扩到整段空白通道。
 
-### 自由单行文字默认扩到安全跨度
+统一 renderer 使用 `MSO_AUTO_SIZE.NONE`。普通 `kind=text` typography TextBox 从首次 spec 起必须写 `overflow=true`，compiler 显式写入 `horzOverflow=overflow` 与 `vertOverflow=overflow`；prebuild、renderer contract 和 structure validation 任一发现 `false`、`clip`、缺失或分轴不一致均 fail closed。不得新增页面级 `autoFit/auto_size` 或在构建后写入 `a:spAutoFit`。该合同不改变表格单元格、图表、matrix/status、图片、图标或背景。
 
-同时满足以下条件的文字直接走自由单行分支，不再先判断“高风险”：无填充、无边框、水平排版、`wrap=false`、`alignment=left|right|center`，并且扩展方向存在已确认的连续安全空间。旋转/竖排文字与 `justify|distributed` 不使用本公式。
+### 自由单行首次构建
 
-根据已经完成的 regions、relationships、层级和元素 bbox 盘点确定水平安全跨度，不新增第二套对象清单或运行时碰撞搜索：
+同时满足无填充、无边框、水平排版、`wrap=false`、`alignment=left|right|center`，且没有可观察裁切/越界/重叠证据时，首次构建保持来源 TextBox 的 `source_bbox`，即使所属通道存在连续空白也不默认扩框、不计算逐对象 `safe_left/safe_right`。按既有 mapping 生成 `slide_bbox` 并与 typography `text_box` 同步；保持 alignment 锚点、y/h、margins、字号、字体、字距、Text Run、Paragraph、reading order、wrap 和垂直对齐。
 
-1. 有表格单元格、卡片、标签、按钮等可见父容器时，以其内部边界为硬边界并进入受限分支。
-2. 无可见父容器时，依次使用所属 region、页面内容范围、幻灯片边界作为候选外边界。
-3. 同一水平通道中与当前文字垂直范围明显相交的前景图标、其他文字、数据标签、连接线端点和容器边界是硬障碍；背景色块、纹理和底层装饰不是障碍。
-4. 在硬障碍前保留编辑安全间隔 `g_pt=max(1.0, 0.1×max_run_font_size_pt)`，用页面既有 mapping 换算到 source 坐标；经过该间隔处理后的边界记为 `safe_left/safe_right`。
-5. 包含原始可见文字框的连续区间才是当前文字的安全跨度；不存在该区间时进入受限分支。
+`overflow=true` 是 reader 可见性安全网，不是视觉通过结论。可见文字越过幻灯片/容器、与前景重叠、新增换行或锚点漂移仍是 P0/P1。
 
-设来源可见文字框为 `x,y,w,h`，在 source 坐标扩展：
+### 证据触发的定向修正
 
-| alignment | source 变换 | 必须保持的锚点 |
-|---|---|---|
-| `left` | `x'=x; w'=safe_right-x` | `x'=x` |
-| `right` | `x'=safe_left; w'=x+w-safe_left` | `x'+w'=x+w` |
-| `center` | `c=x+w/2; d=min(c-safe_left, safe_right-c); x'=c-d; w'=2d` | `x'+w'/2=x+w/2` |
+只有命中下列可观察条件时才修正 bbox；修改必须限制在当前对象或同一已证实根因的对象，不能恢复全局默认扩框：
 
-页面专用 `prepare_spec.py` 可以使用下列局部函数；安全跨度仍来自当页既有元素盘点：
+| 触发条件 | 定向处理 |
+|---|---|
+| `wrap=true` 或来源存在多行 | 保持来源宽度和换行；仅在普通视图实际裁切且来源布局允许时调整容器内 bbox |
+| 卡片、表格单元格、标签、按钮等可见容器或邻近前景障碍 | 保持 alignment 锚点，把 box 修正到容器内部、padding 和障碍前的可用边界；不得越界 |
+| 来源有明确 padding、上下边界或垂直对齐约束 | 只修正违反该约束的一侧，保持原视觉锚点和 y/h，除非证据明确要求垂直修正 |
+| 普通视图确认越过页面/容器边界或新增前景重叠 | 不扩向问题方向，进入下方越界 fallback |
+| 旋转/竖排、`justify|distributed`、special text、表格/图表/matrix/status 等非普通文字路径 | 使用各自合同，不套用自由单行策略 |
+| reader 在双轴 overflow 下仍于普通视图裁切 | 允许在已确认连续可用空间内做最小定向扩框，并保持 alignment 锚点；同步 `source_bbox`、`slide_bbox` 与 typography `text_box` |
 
-```python
-def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
-    x, y, width, height = bbox
-    right = x + width
-    center = x + width / 2
-    if alignment == "left":
-        return [x, y, safe_right - x, height]
-    if alignment == "right":
-        return [safe_left, y, right - safe_left, height]
-    half = min(center - safe_left, safe_right - center)
-    return [center - half, y, 2 * half, height]
-```
+普通视图裁切但悬停或双击编辑态完整，仍属于 reader 实际裁切；不拆框、不补字、不图片化。仅有理论风险、空白通道或 glyph overhang 推测不构成扩框证据。
 
-扩框后必须同时满足：`y/h` 不变；对应 alignment 锚点精确不变；新框位于安全跨度内；左右 margins、字号、字体、字距、Paragraph、Text Run、wrap 和垂直对齐不变；普通 `kind=text` typography TextBox 的 `overflow` 始终为 `true`。element `source_bbox` 写扩展后的 source 框，再由 canvas mapping 生成 `slide_bbox` 并与 typography `text_box` 完全同步；原始可见字形框继续保留在 measurement evidence，不得造成 `SPEC_SLIDE_BBOX_MAPPING_INVALID` 或 `SPEC_TEXT_BOX_MAPPING_INVALID`。
+可见容器内的 box 已修正到可用边界但容量仍不足，且文字尚未越界/重叠时，依次回收非锚点 margin、仅在来源允许时调整 wrap、仅在 preview 证明同组字形系统性偏大时按比例校准语义组字号；仍不足则保留开放 P0/P1。
 
-如果容量已经足够、只有对齐锚点一侧的 glyph overhang 被外框裁切，则只在该侧扩展外框并给同侧 margin 增加等量，保持文字锚点和 `usable_width` 不变；不得把这条规则用于末字容量不足。
+### 越界 fallback
 
-### 受限文字回退
+`wrap=false` 文字越过页面/容器或与前景重叠时，扩框不能修复可见字形的位置，按下列顺序处理：
 
-表格单元格、矩阵格子、卡片、标签、按钮、页面硬边界，以及与前景图标或其他文字共享狭窄通道的 TextBox 都是受限文字。`wrap=true` 的多行文字也不套用自由单行公式，避免扩宽后改变来源换行。
-
-受限文字不得越过来源容器或硬障碍，按固定顺序处理：
-
-1. 保持 alignment 锚点，把 box 扩展到容器内部或相邻硬障碍前的安全边界。
-2. 仍不足时，只回收不承担视觉锚点的 margin：`left` 只动右侧、`right` 只动左侧、`center` 左右等量；不得清零全部 margins。
-3. 来源本来允许自动换行时才调整 wrap；来源 `wrap=false` 时不得为了容纳文字改成多行。
-4. box、非锚点 margin 和来源允许的 wrap 都无法解决，并且实际 preview 确认生成字形比来源偏大时，才以 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准同一语义组字号；不得逐框“减 1pt”试排。
-5. 仍无法在安全边界内容纳时保留为开放 P0/P1 并披露；`overflow=true` 只保证文字不被 TextBox 裁掉，不能把越界、重叠、硬换行或图片化变成可接受结果。
-
-统一 renderer 继续使用 `MSO_AUTO_SIZE.NONE`。普通 `kind=text` typography TextBox 从首次 spec 起必须写 `overflow=true`，compiler 显式写入 `horzOverflow=overflow` 与 `vertOverflow=overflow`；prebuild、renderer contract 和 structure validation 任一发现 `false`、`clip`、缺失或分轴不一致均 fail closed。该安全网只保证 PowerPoint 不隐藏框外文字，安全跨度、容器边界、非锚点 margin、来源允许的 wrap、字号与视觉锚点规则全部继续生效；可见文字越过合理边界、离开页面或与相邻元素重叠仍是 P0/P1。不得新增页面级 `autoFit/auto_size`、不得在构建后写入 `a:spAutoFit`，也不得把 PowerPoint 的“根据文字调整形状大小”作为常规生成修复。本规则只调整普通 typography TextBox，不改变表格单元格、图表、matrix/status、图片、图标或背景的既有合同，也不新增分轴 schema 字段。
+1. 若同一语义组生成字形相对来源系统性偏大，按 `new_font_pt=current_font_pt×target_glyph_px/current_glyph_px` 校准整个语义组；不得逐框“减 1pt”试排。
+2. 只有来源允许自动换行时才调整 wrap；来源 `wrap=false` 不得为了容纳文字改成多行。
+3. 仍不足时只回收不承担视觉锚点的 margin：`left` 只动右侧、`right` 只动左侧、`center` 左右等量；不得清零全部 margins。
+4. 仍无法满足边界和重叠约束时保留开放 P0/P1 并披露；不得 AutoFit、运行时测字、硬换行、改写文字或图片化。
 
 ### 普通视图验证门禁
 
-首次 preview 在普通视图检查每个 TextBox 的首字符、末字符、粗体/数字/英文/标点、来源行数、意外换行、扩框重叠、字号和视觉锚点。悬停或双击后显示完整不能算通过；任一可见裁切或新增 P0/P1 都不得写视觉通过终态。预览不可用时遵守当前 profile 的草稿交付合同，但必须披露文字视觉完整性未验证，不得宣称裁切问题已经解决。
+普通视图检查每个 TextBox 的首字符、末字符、粗体/数字/英文/标点、来源行数、意外换行、定向修正后的边界/重叠、字号和视觉锚点。悬停或双击后显示完整不能算通过；任一可见裁切或新增 P0/P1 都不能判文字视觉通过。预览不可用时不得作出文字视觉通过结论；后续状态与交付只按当前 `verification_profile` 的 reference 处理。
 
 ### 裁切处理速查
 
 | 场景 | 一线处理 | 仍失败时 | 不要做 |
 |---|---|---|---|
-| 自由、水平、`wrap=false`、`left|right|center` | 按 alignment 扩到完整安全跨度并重算 mapping | 普通视图检查边界盘点是否遗漏硬障碍 | 固定加 `0.5em/1.0em`、测字、改字号 |
-| 有可见容器或邻近前景障碍 | 扩到容器内部/硬障碍前安全边界 | 非锚点 margin → 来源允许的 wrap → 有实测证据时按比例校准语义组字号 | 越界、清零全部 margin、逐框减 `1pt` |
-| `wrap=true` 且换行与来源一致 | 保持原框宽度与换行 | 实际裁切时进入受限分支 | 套用自由单行公式 |
-| 锚点侧 glyph overhang | 外框与同侧 margin 等量扩展 | 合入唯一集中修复复核 | 把 overhang 当末字容量不足 |
-| 编辑态完整、普通视图裁切 | 按固定框容量问题处理 | 普通视图 preview 判定 | 以悬停/双击态判通过 |
+| 自由、水平、`wrap=false`、无实证问题 | 保持来源 bbox，启用 overflow | 普通视图验证 | 因空白空间默认扩框 |
+| reader 在 overflow 下仍实际裁切 | 当前对象最小定向扩框并同步三套 bbox | 越界 fallback | 恢复全局扩框 |
+| 页面/容器越界或前景重叠 | 语义组字号 → 来源允许的 wrap → 非锚点 margin | 保留开放 P0/P1 | 向问题方向扩框、AutoFit |
+| `wrap=true` 或可见容器 | 保持来源换行并服从容器/padding | 有实际裁切再定向修正 | 套用自由单行策略 |
 
 ## 行距、段距与框内垂直位置
 
@@ -105,12 +80,7 @@ def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
 
 `line_spacing` 沿用 schema v2 的现有比例值，不新增固定磅值模式或平行字段。视觉上包含两行及以上，或来源不是顶部对齐时，该 typography item 必须增加：
 
-```json
-"source_layout": {
-  "line_center_distances_pt": [16.2],
-  "text_block_center_offset_y_pt": 0.0
-}
-```
+例如：`"source_layout":{"line_center_distances_pt":[16.2],"text_block_center_offset_y_pt":0.0}`。
 
 数组按可见行从上到下记录相邻行中心距；空数组表示单行。中心偏移是可见文字块中心减 TextBox 中心，正值向下。它只保存来源测量目标，不替代 `paragraphs[]`、`text_box.vertical_alignment` 或 margins。
 
@@ -134,23 +104,19 @@ def expand_free_text_bbox(bbox, alignment, safe_left, safe_right):
 
 ## 字体与字号
 
-`rapid` 与 `reviewed` 都把字体视为构建意图，而不是运行时门禁。每页第一项 typography 的 `selected_font` 是 `preferred_font`；同页每个 `selected_font`、`internal_font_declaration`、非空且非 `follow_text` 的 `bullet_font`，以及 element 中的 `font_name/font.name` 都必须与它一致。`source_font_guess` 只记录源图观感，来源不确定时可写 `fallback_reason=source_font_uncertain`。
+所有 `verification_profile` 都把字体视为构建意图，而不是运行时门禁。每页第一项 typography 的 `selected_font` 是 `preferred_font`；同页每个 `selected_font`、`internal_font_declaration`、非空且非 `follow_text` 的 `bullet_font`，以及 element 中的 `font_name/font.name` 都必须与它一致。`source_font_guess` 只记录源图观感，来源不确定时可写 `fallback_reason=source_font_uncertain`。
 
 compiler 必须把 `preferred_font` 显式写入一致的 `a:latin/a:ea/a:cs/a:sym`，不得依赖主题字体。两种模式都不检查字体文件、TTC face 或 fontconfig；LibreOffice/PowerPoint 的实际 fallback 不回写规格、不触发换字或第二次 build。可选预览中的 `pdffonts` 只生成 `matched/mismatches` 诊断；若 preview 已成功生成，`matched=false` 或 fallback 不使 preview 失效，也不阻止主代理视觉审查。字体 fallback 本身不是 P0/P1，只有导致可见裁切、错误换行、溢出或层级问题时，才按这些可见差异评级。
 
 `runs[].font_size` 固定使用 point（pt），文本坐标使用 EMU；自定义字号字段以 `_font_size_pt` 结尾。初值按页面实际比例估算，不使用固定 96 DPI：
 
-```text
-scale_pt_per_source_px =
-  min(slide_width_emu / 12700 / page_frame_width_px,
-      slide_height_emu / 12700 / page_frame_height_px)
-```
+`scale_pt_per_source_px = min(slide_width_emu / 12700 / page_frame_width_px, slide_height_emu / 12700 / page_frame_height_px)`。
 
 比例只映射物理长度，不把 glyph 高度当作字体 em。先确认页面映射、`preferred_font`、显式 margin 和关闭 AutoFit，再按来源估计字号。可选预览无明显字号、换行或溢出差异时继续；有系统性差异时，从标题、正文、数字/KPI、列表/表格等实际存在组别各选一个代表性高风险 TextBox，以 `new_font_pt = current_font_pt × target_glyph_px / current_glyph_px` 修正同一规格，目标框及相邻边界改善后应用于同组。不逐框试排，不做自动字号搜索，不新增字体优化状态机。
 
 不做字体比较、候选字体试排或阶段性换字。特殊字符、生僻字、公式、多语言或缺字只能触发局部内容调查，不能在渲染后修改 `preferred_font`。
 
-调整顺序由根因决定：同一语义组的生成字形系统性大于来源时先校准字号；字号与来源一致而首尾裁切时按 box → margin/wrap 处理；受限容器没有扩框空间时，字号才是最后兜底。随后才调整字距 → 行/段距 → 垂直对齐；先锁定换行位置，再校准相邻行中心距，最后校准文字块纵向中心。自动折行只改 `line_spacing`，真实段落优先改相邻一侧的 `space_after/space_before`。不用硬换行、拆框、过度缩字、改写或图片化掩盖问题。若生成了预览，把 source/preview 中全部可见文字问题合入一次修复批次；修正后重跑 build、structure、background，并至多再生成一次预览。字体 fallback 只披露，不修复。`validate_pptx.py --spec` 继续核对 OOXML Text Run 字号与规格 point 值。
+调整顺序由根因决定：同一语义组的生成字形系统性大于来源时先校准字号；字号与来源一致而首尾裁切时按 box → margin/wrap 处理；受限容器没有扩框空间时，字号才是最后兜底。随后才调整字距 → 行/段距 → 垂直对齐；先锁定换行位置，再校准相邻行中心距，最后校准文字块纵向中心。自动折行只改 `line_spacing`，真实段落优先改相邻一侧的 `space_after/space_before`。不用硬换行、拆框、过度缩字、改写或图片化掩盖问题。将 source/preview 中全部可见文字问题写入当前 profile 的同一次问题报告，修复预算与证据重建次数由该 profile reference 决定。字体 fallback 只披露，不修复。`validate_pptx.py --spec` 继续核对 OOXML Text Run 字号与规格 point 值。
 
 ## 特殊文本与最低可编辑性
 
